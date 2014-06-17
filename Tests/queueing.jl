@@ -17,7 +17,7 @@ UCSBound(mbt, mfx, sigt, sigx, eps) = (1/eps -1) * (sigt^2 + sigx^2) / 4 / (mbt 
 x_dist = Gamma(2, 2)
 t_dist = Exponential(4.2)
 const delta = .2
-numBoot = int(1e2)
+numBoot = int(1e5)
 
 #######
 #Steady-State median waiting time as a fcn of N
@@ -33,8 +33,8 @@ fb_bounds = Float64[]
 cs_bounds = Float64[]
 king1_bounds = Float64[]
 king2_bounds = Float64[]
-# N_grid = ifloor( 10.^ linspace(4, 7, 8) )
-N_grid = [50000]
+N_grid = ifloor( 10.^ linspace(4, 7, 7) )
+#N_grid = [50000]
 
 for N = N_grid
 	println("Iteration N: \t $N")
