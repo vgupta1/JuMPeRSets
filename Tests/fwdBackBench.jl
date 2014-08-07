@@ -12,6 +12,4 @@ tic()
 println("Elapsed Time:\t", toc())
 #Profile.print()
 
-#baseline  21.8 s
-#precomputing 1.14 s
-#With a better hint .80
+#On old macbook pro, runs in about 2.613250662
