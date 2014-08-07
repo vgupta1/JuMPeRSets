@@ -7,12 +7,28 @@
 # Optimize performance... by row? dataframe? 
 # Support multiple function evaluations per simulation?
 
-#Should ideally leverage base functionality
-function boot(data, fun, probs, numBoots_)
-	const numBoots = int(numBoots_)
-	const n        = size(data, 1)
-	fun2(ix) = fun(data[rand(1:n, n), :])
-	out = map(fun2, 1:numBoots)
-	quantile(out, probs)
+using Distributions
+
+function boot(data::Vector, fun::Function, prob::Float64, numBoots::Int, f_args...)
+	const N = size(data, 1)
+	dist = DiscreteUniform(1, N)
+	out = zeros(Float64, numBoots)
+	indices = [1:N]::Vector{Int}
+	for i = 1:numBoots
+		rand!(dist, indices)
+		out[i] = fun(data[indices], f_args...)
+	end
+	quantile(out, prob)
 end
 
+function boot(data::Matrix, fun::Function, prob::Float64, numBoots::Int, f_args...)
+	const N = size(data, 1)
+	dist = DiscreteUniform(1, N)
+	out = zeros(Float64, numBoots)
+	indices = [1:N]::Vector{Int}
+	for i = 1:numBoots
+		rand!(dist, indices)
+		out[i] = fun(data[indices, :], f_args...)
+	end
+	quantile(out, prob)
+end

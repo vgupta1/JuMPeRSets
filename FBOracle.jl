@@ -11,18 +11,6 @@ include("bootstrap.jl")
 # Write tests
 # Implement reformulation as a SOCP
 
-#Safer versions of log-sum-exp
-#VG Update the UI calc to use these
-function logSumExp(x, data, probs)
-    b = x > 0 ? maximum(data) : minimum(data)
-    x*b + log(dot(probs, exp(x * (data-b))))
-end
-
-function logSumExp(x, data)
-    b = x > 0 ? maximum(data) : minimum(data)
-    x*b + log(mean(exp(x * (data-b))))
-end
-
 #calculates the means via t approx
 # if joint, bounds hold (jointly) simultaneously at level 1-delta_
 # o.w. bounds hold individually at level 1-delta_
@@ -34,95 +22,62 @@ function calcMeansT(data, delta_; joint=true)
     mean(data) + quantile(dist, delta) * sig / sqrt(N), mean(data) + quantile(dist, 1-delta)*sig/sqrt(N)
 end
 
-#calculates eq. 21 for a single bootstrap sample
-#VG tune the inner optimization for performance
-function calcSigSample(boot_sample, CASE)
-    mu = mean(boot_sample)
-    sig = std(boot_sample)
-    b = CASE == :Fwd ? maximum(boot_sample) : minimum(boot_sample)
-    f(x) = 2mu/x - 2/x^2 * logSumExp(x, boot_sample)  #include a negative bc we minimize
+#Safer versions of log-sum-exp
+#VG Update the UI calc to use these
+function logSumExp(x::Float64, data_shift::Vector, b::Float64)
+    x*b + log(mean(exp(x * (data_shift))))
+end
+logSumExp(x::Float64, data::Vector) = (const b = x > 0 ? maximum(data) : minimum(data); logSumExp(x, data-b, b))
 
+#Non Derivative Version
+function calcSigSample!(boot_sample::Vector, CASE::Symbol, 
+                        hint::Float64, min_u::Float64, max_u::Float64, factor = 2.)
+    const mu = mean(boot_sample)
     if CASE == :Fwd
-        res = optimize(f, sig, 10sig)
+        f(x) = 2mu/x - 2/x^2 * logSumExp(x, boot_sample-max_u, max_u)  #include a negative bc we minimize
+        res = optimize(f, hint/factor, factor*hint)
     elseif CASE == :Back
-        res = optimize(f, -10sig, -sig)
+        f(x) = 2mu/x - 2/x^2 * logSumExp(x, boot_sample-min_u, min_u)  #include a negative bc we minimize
+        res = optimize(f, factor*hint, hint/factor)
     end
     !res.converged && error("Bootstrapping Opt did not converge")
-
     @assert res.f_minimum < 0
-    return sqrt(-res.f_minimum), res.minimum
+    hint = res.minimum
+    return sqrt(-res.f_minimum)
 end
 
-#uses newton method with a hint.
-#If we fail, calls other method with warning
-function calcSigSample(boot_sample, CASE::Symbol, hint::Float64)
-    mu = mean(boot_sample)
-    b = CASE == :Fwd ? maximum(boot_sample) : minimum(boot_sample)
-    #array version
-    f(x) = 2mu/x[1] - 2/x[1]^2 * logSumExp(x[1], boot_sample)  #include a negative bc we minimize
-
+function calcSigSampleBnd!(boot_sample::Vector, CASE::Symbol, 
+                            min_u::Float64, max_u::Float64, lbound::Float64, ubound::Float64)
+    const mu = mean(boot_sample)
     if CASE == :Fwd
-        res = optimize(f, [hint], method=:cg, autodiff=true)
+        f(x) = 2mu/x - 2/x^2 * logSumExp(x, boot_sample-max_u, max_u)  #include a negative bc we minimize
     elseif CASE == :Back
-        res = optimize(f, [hint], method=:cg, autodiff=true)
+        f(x) = 2mu/x - 2/x^2 * logSumExp(x, boot_sample-min_u, min_u)  #include a negative bc we minimize
     end
-    if !res.f_converged
-        warn("Sigsample did not converge with hint.  Running bisection.")
-        return calcSigSample(boot_sample, CASE)
-    end 
-
+    res = optimize(f, lbound, ubound)
+    !res.converged && error("Bootstrapping Opt did not converge")
     @assert res.f_minimum < 0
     return sqrt(-res.f_minimum), res.minimum
 end
 
-type FwdBackRes
-    sigfwd::Float64
-    sigback::Float64
-    hintfwd::Union(Float64, Nothing)
-    hintback::Union(Float64, Nothing)
-end
-
-# if joint, bounds hold (jointly) simultaneously at level 1-delta_
-# o.w. bounds hold individually at level 1-delta_
-# function calcSigsBoot(data::Vector{Float64}, delta_, numBoots; 
-#                       CASE=:Both, joint=CASE==:Both, hintfwd = nothing, hintback=nothing)
-#     delta = joint ? delta_/2 : delta_
-#     sigfwd = 0.; sigback = 0.;
-#     if CASE == :Fwd || CASE == :Both
-#         if hintfwd == nothing
-#             #solve it once on data to get a reasonable starting point
-#             dummy, hintfwd = calcSigSample(data, :Fwd)
-#         end
-#         fwd(boot_sample) = calcSigSample(boot_sample, :Fwd)[1]
-#         # fwd(boot_sample) = calcSigSample(boot_sample, :Fwd, hintfwd)[1]
-#         sigfwd = boot(data, fwd, 1-delta, numBoots)
-#     end
-#     if CASE == :Back || CASE == :Both
-#         if hintback == nothing
-#             dummy, hintback = calcSigSample(data, :Back)
-#         end
-#         back(boot_sample) = calcSigSample(boot_sample, :Back, hintback)[1]
-#         sigback = boot(data, back, 1-delta, numBoots)
-#     end
-#     FwdBackRes(sigfwd, sigback, hintfwd, hintback)
-# end
-
-function calcSigsBoot(data::Vector{Float64}, delta_, numBoots; 
+function calcSigsBoot(data::Vector, delta_, numBoots::Int; 
                       CASE=:Both, joint=CASE==:Both)
-    delta = joint ? delta_/2 : delta_
+    delta  = joint ? delta_/2 : delta_
     sigfwd = 0.; sigback = 0.;
+    min_u::Float64 = minimum(data)
+    max_u::Float64 = maximum(data)
     if CASE == :Fwd || CASE == :Both
-        fwd(boot_sample) = calcSigSample(boot_sample, :Fwd)[1]
-        sigfwd = boot(data, fwd, 1-delta, numBoots)
+        #call it once to determine apropriate hint
+        hint = calcSigSampleBnd!(data, :Fwd, min_u, max_u, 1e-10, 10*std(data))[2]
+        sigfwd = boot(data, calcSigSample!, 1-delta, numBoots, :Fwd, hint, min_u, max_u)
     end
     if CASE == :Back || CASE == :Both
-        back(boot_sample) = calcSigSample(boot_sample, :Back)[1]
-        sigback = boot(data, back, 1-delta, numBoots)
+        hint = calcSigSampleBnd!(data, :Back, min_u, max_u, -10*std(data), -1e-10)[2]
+        println("Hint \t $hint")
+        sigback = boot(data, calcSigSample!, 1-delta, numBoots, :Back, hint, min_u, max_u)
     end
-    FwdBackRes(sigfwd, sigback, nothing, nothing)
+    sigfwd, sigback 
 end
-
-
 
 #could be better about handling overflow
 function calcSigsExact(mu, mgf, xmin=1e-10, xmax=1e2)
@@ -135,7 +90,7 @@ function calcSigsExact(mu, mgf, xmin=1e-10, xmax=1e2)
     sigb = sqrt(-res.f_minimum)
     hintback = res.minimum
 
-    return FwdBackRes(sigf, sigb, hintfwd, hintback)
+    return sigf, sibg
 end
 
 #log_eps = log(1/eps_)

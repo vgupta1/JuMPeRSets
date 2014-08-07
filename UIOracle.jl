@@ -64,14 +64,6 @@ function suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR; lam_min=1e-
     dot(ustar, xs), ustar
 end
 
-# data = randn(20, 2)
-# data[:, 1] = sort(data[:, 1])
-# data[:, 2] = sort(data[:, 2])
-# lbounds = minimum(data, 1) - .1
-# ubounds = maximum(data, 1) + .1
-# qR = qL = ones(22) / 22
-# println( suppFcnUI([1 1], data, vec(lbounds), vec(ubounds), log(1/.1), qL, qR) )
-
 type UIOracle <: AbstractOracle
     cons::Dict{Int, UncConstraint} #[cnst index master problem => unc. cnst]
     setup_done::Bool

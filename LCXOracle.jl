@@ -7,32 +7,8 @@ import JuMPeR: registerConstraint, setup, generateCut, generateReform
 include("bootstrap.jl")
 
 #To Do
-# Implement the bootstrapping computation
 # Write tests
 # Merge this and the sampling formulation via an appropriate argument to constructor
-
-#Approximates the threshold by sampling a bunch of abs for each bootstrap rep
-#VG Could be optimized
-function calc_ab_thresh(data::Matrix{Float64}, delta, numBoots, numSamples)
-    const N = size(data, 1)
-    const d = size(data, 2)
-
-    function boot_func(boot_sample)
-        Gamma::Float64 = 0.0
-        for i = 1:numSamples
-            a::Vector{Float64} = randn(d)
-            a /= norm(a)
-            const as = data * a
-            const as_sample = boot_sample * a
-            for b in as
-                Gamma = max(Gamma, mean(max(as_sample -b, 0)) - mean(max(as-b, 0)))
-            end
-        end
-        Gamma
-    end
-    boot(data, boot_func, 1-delta, numBoots)
-end
-
 
 #returns bool, violated ab_cut
 #Solves 4 LPs
@@ -58,7 +34,7 @@ function ab_cut(us, vs, z, data, eps_, CASE)
         @addConstraint(m, abs_a[i] >=  a[i])
         @addConstraint(m, abs_a[i] >= -a[i])
     end
-   @addConstraint(m, abs_b + abs_a[1] + abs_a[2] <= 1)
+   @addConstraint(m, abs_b + abs_a[1] + abs_a[2] <= 1.)
     
     if CASE == :1
         @addConstraint(m, dot(a, vec(vs)) - (z-1) * b >= 0)
@@ -80,7 +56,6 @@ end
 
 #returns the first violation
 function ab_cut(us, vs, z, data, eps_, Gamma, TOL)
-    #Right now solve all of them an return worst one
     obj, astar, bstar = ab_cut(us, vs, z, data, eps_, :1)
     if obj > Gamma + TOL
         return true, astar[:], bstar
@@ -100,36 +75,105 @@ end
 
 #returns zstar,ustar
 #VG Remove the dependency on GurobiSolver() explicitly and take frm user
-function suppFcnLCX(xs, data, eps_, Gamma, cut_sense; bound=1e6, TOL=1e-6)
+function suppFcnLCX(xs, data, eps_, Gamma, cut_sense; bound=1e6, TOL=1e-6, MAXITER=100, trace=false)
     m = Model(solver=GurobiSolver(OutputFlag=0))
     @defVar(m, -bound <= us[1:2] <= bound)
     @defVar(m, vs[1:2])
     @defVar(m, 1 <= z <= 1/eps_)
     @setObjective(m, cut_sense, dot(xs, us))
     status = solve(m)
-    status != :Optimal && error("LCX support failed with status $status")
+    status != :Optimal && error("LCX support init solve failed: $status")
 
     uvals = getValue(us)
     vvals = getValue(vs)
     zval  = getValue(z)
     obj, astar, bstar = ab_cut(uvals[:], vvals[:], zval, data, eps_, Gamma, TOL)
 
+    iter::Int64 = 1
     while obj > Gamma + TOL
+        iter > MAXITER && error("LCX Supp: Max Iterations exceeded")
+        iter += 1
+
         @defVar(m, t[1:2] >= 0)
+        m.internalModelLoaded = false  #VG Eliminate this when time comes
+
         @addConstraint(m, t[1] >= dot(astar[:], vs) - bstar * z + bstar)
         @addConstraint(m, t[2] >= dot(astar[:], us) - bstar)
         @addConstraint(m, t[1] + t[2] <= mean(max(data * astar[:] - bstar, 0))*z + Gamma)
         
         status = solve(m)
-        status != :Optimal && error("Inner Solver Failed status $status")
+        status != :Optimal && error("LCX support Inner Solver Failed: $status")
         uvals = getValue(us)
         vvals = getValue(vs)
         zval  = getValue(z)
         obj, astar, bstar = ab_cut(uvals[:], vvals[:], zval, data, eps_, Gamma, TOL)
+
+        trace && println("Iter: $iter \t $(obj-Gamma) \t $(astar[:]) \t $(bstar[:])")
     end
     getObjectiveValue(m), getValue(us[:])    
 end
 
+########################
+# Bootstrapping computation
+
+#Returns indx of last instance of val, 0 if not found
+#Assumes sorted_list, and sort_list[start] >= val
+function findlast_sort(val::Float64, sort_list::Vector; TOL::Float64=1e-10, start::Int64=1)
+    i::Int64 = 1
+    for i = int(start):length(sort_list)
+        if abs(val - sort_list[i]) > TOL
+            break
+        end
+    end
+    i-1
+end
+
+## Makes a single pass through zetas/zetahats to solve
+# 1/N * max_b { sum_i [zeta_i - b] ^+ - sum_i[zetahat_i - b]^+ }
+function singlepass!(zetas::Vector, zetahats::Vector)
+    sort!(zetas)  
+    sort!(zetahats)
+
+    vstar::Float64 = mean(zetas) - zetas[1] 
+    vb::Float64    = mean(zetahats) - zetas[1]
+
+    Gamma::Float64 = vstar - vb
+    const N::Int64 = length(zetas)
+    pbar::Float64    = 1.0 
+    hat_indx::Int64  = 1
+    hat_indx_::Int64 = 0
+    
+    for k = 2:length(zetas)
+        vstar += (zetas[k-1] - zetas[k]) * (N-k+1)/N
+        hat_indx = findlast_sort(zetas[k-1], zetahats, start=hat_indx_ + 1)
+        pbar -=  (hat_indx - hat_indx_)/N
+        hat_indx_ = hat_indx
+        vb  += (zetas[k-1] - zetas[k]) * pbar
+        Gamma = max(Gamma, vstar - vb)
+    end
+    Gamma
+end
+
+#a::Vector is used as storage between bootstraps
+function f2(boot_sample::Matrix, data::Matrix, numSamples::Int, a::Vector)
+    Gamma::Float64 = 0.
+    for i = 1:numSamples
+        randn!(a)
+        a /= norm(a)
+        Gamma = max(Gamma, singlepass!(data*a, boot_sample*a))
+    end
+    Gamma
+end
+
+#Approximates the threshold by sampling a bunch of abs for each bootstrap rep
+function calc_ab_thresh(data::Matrix, delta::Float64, numBoots::Int, numSamples::Int)
+    const N = size(data, 1)
+    const d = size(data, 2)
+    a::Vector{Float64} = zeros(Float64, d)
+    boot(data, f2, 1-delta, numBoots, data, numSamples, a)
+end
+
+########################
 type LCXOracle <: AbstractOracle
     cons::Dict{Int, UncConstraint} #[cnst index master problem => unc. cnst]
     setup_done::Bool
@@ -145,12 +189,16 @@ type LCXOracle <: AbstractOracle
     debug_printcut::Bool
 end
 
-#VG ADD A CONSTRUCTOR which determines the value of Gamma
-function LCXOracle(data, eps_; Gamma=nothing, cut_tol=1e-6, debug_printcut=false) 
+function LCXOracle(data, eps_; cut_tol=1e-6, debug_printcut=false, 
+                    numSamples=int(1e4), numBoots=int(1e4), delta=.2) 
     @assert (0 < eps_ < 1) "Epsilon invalid: $eps_"
-    Gamma == nothing && error("Bootstrapping Gamma not yet implemented")
+    Gamma = calc_ab_thresh(data, delta, numBoots, numSamples)
     LCXOracle(Dict{Int,UncConstraint}(), false, data, eps_, Gamma, cut_tol, debug_printcut)
 end
+
+LCXOracle(data, eps_, Gamma; cut_tol=1e-6, debug_printcut=false) = 
+    ( @assert (0 < eps_ < 1) "Epsilon invalid: $eps_";
+    LCXOracle(Dict{Int,UncConstraint}(), false, data, eps_, Gamma, cut_tol, debug_printcut) )
 
 # JuMPeR alerting us that we're handling this contraint
 function registerConstraint(w::LCXOracle, con, ind::Int, prefs)
