@@ -1,0 +1,39 @@
+#### 
+# UI Oracle tests
+####
+include("../ddusets.jl")  #VG should be dropped
+using Base.Test, DDUSets
+using JuMPeR
+
+include("test_helpers.jl")
+
+function suppFcnTest()
+	srand(8675309)
+	data = rand(200, 2)
+	zstar, ustar = suppFcnUI([1, 1], data, [0, 0], [1, 1], log(1/.1), .001)
+	@test_approx_eq(zstar, 1.6436648065224289)
+	@test_approx_eq(ustar[1], .8286168721973264)
+	@test_approx_eq(ustar[2], .8150479343251025)
+
+	zstar, ustar = suppFcnUI([1, -1], data, [0, 0], [1, 1], log(1/.1), .001)
+	@test_approx_eq(zstar, 0.6764338553682907)
+	@test_approx_eq(ustar[1], .837635189604830)
+	@test_approx_eq(ustar[2], .16120133423653965)
+
+	zstar, ustar = suppFcnUI([-1, 1], data, [0, 0], [1, 1], log(1/.1), .001)
+	@test_approx_eq(zstar, 0.6456428391904294)
+	@test_approx_eq(ustar[1], .1708990840068779)
+	@test_approx_eq(ustar[2], .8165419231973073)
+end
+
+function portTest()
+	srand(8675309)
+	data = rand(500, 2)
+	w = UIOracle(data, [0., 0.], [1., 1.], .1, .2) 
+	portTest(w, 0.12335160142638069, [0.5639829612402062, 0.4360170387597938])
+end
+
+Test.with_handler(Test.default_handler) do
+	suppFcnTest()
+	portTest()
+end

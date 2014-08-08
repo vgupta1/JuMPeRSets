@@ -9,9 +9,9 @@ export suppFcnFB
 
 #log_eps = log(1/eps_)
 #returns zstar, ustar
-function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense)
+function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
     toggle = 1
-    if cut_sense == "Min"
+    if cut_sense == :Min
         xs = copy(-xs)
         toggle = -1
     end

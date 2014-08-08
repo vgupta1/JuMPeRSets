@@ -7,7 +7,7 @@ module DDUSets
 using JuMPeR  #VG Talk to Iain about removing this
 include("helpers.jl")
 include("FBOracle.jl")
-
+include("UIOracle.jl")
 
 end
 

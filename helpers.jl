@@ -77,7 +77,7 @@ function calcSigsBoot(data::Vector{Float64}, delta_::Float64, numBoots::Int;
     #parameter choices equiv to searching [1e-10, 9std(data)]
     if CASE == :Fwd || CASE == :Both
         hint = 3e-5*std(data)
-        calcSigSampleHint!(data, :Fwd, hint, min_u, max_u, factor=3e5* std(data))
+        calcSigSampleHint!(data, :Fwd, hint, min_u, max_u, factor=3e5*std(data))
         sigfwd = boot(data, calcSigSampleHint!, 1-delta, numBoots, :Fwd, hint, min_u, max_u)
     end
     if CASE == :Back || CASE == :Both
@@ -102,4 +102,11 @@ function calcSigsExact(mu, mgf, xmin=1e-10, xmax=1e2)
     return sigf, sibg
 end
 
-
+#Currently computed using Stephens Approximation 
+#Journaly of Royal Statistical Society 1970
+function KSGamma(delta, N) 
+       const sqrt_N = sqrt(N)
+       num = sqrt(.5 * log(2/delta))
+       denom = sqrt_N + .12 + .11/sqrt_N
+       num/denom
+end

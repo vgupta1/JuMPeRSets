@@ -43,11 +43,16 @@ function fwdBackSigsTest()
 	@test_approx_eq(sigback, 1.0836954553273133)
 end
 
+function KSGammaTest()
+	@test_approx_eq(KSGamma(.1, 1000), 0.054733283051119734)
+end
+
 Test.with_handler(Test.default_handler) do
 	boot1Test()
 	boot2Test()
 	tapproxTest()
 	logMeanTest()
 	fwdBackSigsTest()
+	KSGammaTest()
 end
 

@@ -2,28 +2,57 @@
 # UI Oracle 
 ###
 # Only supports cutting planes
-using JuMPeR, Optim
+using Optim
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
 
-# To Do
-# Implement the correct threshold computation
-# Write tests
+export suppFcnUI
+export UIOracle
 
 #returns bool, and ustar for degen case
 #data is assumed to have two extra rows representing bounds
 is_degen(d, Gamma, log_eps) = d * log(1/Gamma) <= log_eps
 degen_case(xs, lbounds, ubounds) = [xs[i] >= 0 ? ubounds[i] : lbounds[i]]::Vector{Float64}
 
+function gen_ql_qr(N::Int, Gamma)
+    qL = zeros(Float64, N+2)
+    qL[1] = Gamma
+    qL[2:ifloor(N * (1-Gamma)) + 1] = 1/N
+    qL[ifloor(N * (1-Gamma)) + 2] = 1-sum(qL)
+    @assert (abs(sum(qL)-1) <= 1e-10) "QL not normalized $(sum(qL))"
+    return qL, qL[N+2:-1:1]
+end
+
+function sort_data_cols(data)
+    data_sort = zeros(eltype(data), size(data))
+    const d = size(data, 2)
+    for i = 1:d
+        data_sort[:, i] = sort(data[:, i])
+    end
+    data_sort
+end
+
+#preferred interface
+function suppFcnUI(xs, data, lbounds, ubounds, log_eps, Gamma; cut_sense=:Max, lam_min=1e-8, lam_max=1e2, xtol=1e-8)
+    data_sort = sort_data_cols(data)
+    qL, qR = gen_ql_qr(size(data_sort, 1), Gamma)
+    suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR, cut_sense, lam_min, lam_max, xtol)
+end
 
 #returns zstar, ustar
-function suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR; lam_min=1e-8, lam_max = 1e2, xtol=1e-8)
-    N = size(data_sort, 1)
-    d = size(data_sort, 2)
-    Gamma = qL[1]
+function suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR, cut_sense, lam_min=1e-8, lam_max = 1e2, xtol=1e-8)
+    toggle = 1
+    if cut_sense == :Min
+        xs = copy(-xs)
+        toggle = -1
+    end
+
+    const N = size(data_sort, 1)
+    const d = size(data_sort, 2)
+    const Gamma = qL[1]
 
     if is_degen(d, Gamma, log_eps)
         ustar = degen_case(xs, lbounds, ubounds)
-        return dot(xs, ustar), ustar
+        return toggle*dot(xs, ustar), ustar
     end
 
     #extend the data with the bounds
@@ -33,7 +62,7 @@ function suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR; lam_min=1e-
         term = lam * log_eps
         term2 = 0.0
         for i =1:d
-            #attempt to correct for potential overlow
+            #corrected for overflow
             if xs[i] > 0
                 t = exp(xs[i] * (data[:, i] - ubounds[i]) / lam)
                 t = dot(qR, t)
@@ -61,7 +90,7 @@ function suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR; lam_min=1e-
         qstar /= sum(qstar)
         ustar[i] = dot(qstar, data[:, i])
     end
-    dot(ustar, xs), ustar
+    toggle*dot(ustar, xs), ustar
 end
 
 type UIOracle <: AbstractOracle
@@ -82,20 +111,13 @@ type UIOracle <: AbstractOracle
     debug_printcut::Bool
 end
 
-DKWApprox(delta, N) = sqrt( log(2/delta)/N )
+#preferred constructor
 function UIOracle(data, lbounds, ubounds, eps, delta; cut_tol = 1e-6) 
-    data_sort = zeros(Float64, size(data))
     N, d = size(data)
-    for i = 1:d
-        data_sort[:, i] = sort(data[:, i])
-    end
-    Gamma = DKWApprox(delta, N)
-    qL = zeros(Float64, N+2)
-    qL[1] = Gamma
-    qL[2:ifloor(N * (1-Gamma)) + 1] = 1/N
-    qL[ifloor(N * (1-Gamma)) + 2] = 1-sum(qL)
-    @assert (abs(sum(qL)-1) <= 1e-10) "QL not normalized $(sum(qL))"
-    UIOracle(Dict{Int, UncConstraint}(), false, vec(lbounds), vec(ubounds), data_sort, log(1/eps), qL, qL[N+2:-1:1], 1e-6, false)
+    data_sort = sort_data_cols(data)
+    Gamma = KSGamma(delta, N)
+    qL, qR = gen_ql_qr(N, Gamma)
+    UIOracle(Dict{Int, UncConstraint}(), false, vec(lbounds), vec(ubounds), data_sort, log(1/eps), qL, qR, 1e-6, false)
 end
 
 # JuMPeR alerting us that we're handling this contraint
@@ -120,7 +142,7 @@ function setup(w::UIOracle , rm::Model)
     w.setup_done = true
 end
 
-function generateCut(w::UIOracle   , rm::Model, ind::Int, m::Model, cb=nothing, active=false)
+function generateCut(w::UIOracle, rm::Model, ind::Int, m::Model, cb=nothing, active=false)
     # Update the cutting plane problem's objective
     con = w.cons[ind]
     cut_sense, unc_obj_coeffs, lhs_const = JuMPeR.build_cut_objective(con, m.colVal) #m.colVal= master_sol
@@ -131,7 +153,7 @@ function generateCut(w::UIOracle   , rm::Model, ind::Int, m::Model, cb=nothing, 
     xs = zeros(length(coeffs))
     xs[[indx...]] = [coeffs...]
 
-    zstar, ustar = suppFcnUI(xs, w.data_sort, w.lbounds, w.ubounds, w.log_eps, w.qL, w.qR)
+    zstar, ustar = suppFcnUI(xs, w.data_sort, w.lbounds, w.ubounds, w.log_eps, w.qL, w.qR, cut_sense)
     lhs_of_cut = zstar + lhs_const
 
     #VG Correct this after Iain changes base JumPer
