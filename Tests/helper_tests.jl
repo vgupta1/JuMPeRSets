@@ -47,6 +47,18 @@ function KSGammaTest()
 	@test_approx_eq(KSGamma(.1, 1000), 0.054733283051119734)
 end
 
+function boot_mu_test()
+	srand(8675309); data = randn(100)
+	mu_up = boot_mu(data, .1, 100)
+	@test_approx_eq(mu_up, 0.15990283885891624)
+end
+
+function boot_sigma_test()
+	srand(8675309); data = randn(100)
+	dist = boot_sigma(data, .1, 100)
+	@test_approx_eq(dist, 0.19634843708262117)
+end
+
 Test.with_handler(Test.default_handler) do
 	boot1Test()
 	boot2Test()
@@ -54,5 +66,7 @@ Test.with_handler(Test.default_handler) do
 	logMeanTest()
 	fwdBackSigsTest()
 	KSGammaTest()
+	boot_mu_test()
+	boot_sigma_test()
 end
 
