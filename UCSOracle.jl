@@ -2,9 +2,13 @@
 # UCS Oracle 
 ###
 # At the moment only supports cutting planes
-using JuMPeR
+#using JuMPeR
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
-include("bootstrap.jl")
+
+using Gurobi
+
+export UCSOracle
+export suppFcnUCSRd
 
 #To Do
 # Check bounds and use closed-form support function
@@ -27,55 +31,45 @@ type UCSOracle <: AbstractOracle
     cut_tol::Float64  ##defaults to 1e-6
     cut_model::Model
     cut_vars::Vector{Variable}
+    unbounded_support::Bool   #True if no support bounds on any uncertainties
 
     # Other options
     debug_printcut::Bool
 end
 
-function boot_mu(data, delta, numBoots)
-    const muhat = mean(data, 1)
-    myfun(data_b) = norm(mean(data_b, 1) - muhat)
-    boot(data, myfun, 1-delta, numBoots)
-end
-
-function boot_sigma(data, delta, numBoots)
-    const covhat = cov(data)
-    myfun(data_b) = normfro(cov(data_b) - covhat)
-    boot(data, myfun, 1-delta, numBoots)
-end
-
-# data stored in rows
-function UCSOracle(data, eps_kappa; Gamma1 = nothing, Gamma2 = nothing, 
-                                    delta1 = nothing, delta2 = nothing, 
-                                    numBoots= int(1e5), 
-                                    cut_tol=1e-6) 
-    Gamma1 == nothing && delta1 == nothing && error("Must supply either Gamma1 or delta1")
-    Gamma2 == nothing && delta2 == nothing && error("Must supply either Gamma2 or delta2")
-    Gamma1 == nothing && (Gamma1 = boot_mu(data, delta1, numBoots))
-	Gamma2 == nothing && (Gamma2 = boot_sigma(data, delta2, numBoots))
-
-    println("Gamma1 \t $Gamma1")
-    println("Gamma2 \t $Gamma2")
-
-	covbar = cov(data) + Gamma2 * eye(size(data, 2))
-    C = chol(covbar, :U)  #C'C = covbar
+function UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_; cut_tol = 1e-6)
+    covbar = covhat + Gamma2 * eye(size(covhat)...)
+    C = chol(covbar, :U)   #C'C = covbar
     UCSOracle(  Dict{Int, UncConstraint}(), false, 
-    			eps_kappa, Gamma1, Gamma2, vec(mean(data, 1)), covbar, C, 
-                cut_tol, Model(), Variable[], 
-                false)  
+                eps_, Gamma1, Gamma2, muhat, covbar, C, 
+                cut_tol, Model(solver=GurobiSolver(OutputFlag=false)), Variable[], false, false)  
 end
 
-kappa(eps) = sqrt(1/eps - 1)
+#preferred interface
+function UCSOracle(data, eps_, delta1, delta2; numBoots=10000, cut_tol=1e-6)
+    muhat  = vec(mean(data, 1))
+    covhat = cov(data)
+    Gamma1 = boot_mu(data, delta1, numBoots)
+    Gamma2 = boot_sigma(data, delta2, numBoots)
+    UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_, cut_tol=cut_tol)
+end
+
+
+kappa(eps_) = sqrt(1./eps_ - 1.)
 
 #the supp fcn when support = Rd
-function suppFcnRd(xs, muhat, Gamma1, Gamma2, covbar, eps_k)
+function suppFcnUCSRd(xs, muhat, Gamma1, Gamma2, covbar, eps_k, cut_sense=:Max)
+    toggle = 1.
+    if cut_sense == :Min
+        xs = copy(-xs)
+        toggle = -1.
+    end
     norm_x = norm(xs)
-    sig_term = sqrt(xs' * w.covbar * xs)[1]
+    sig_term = sqrt(xs' * covbar * xs)[1]
     ustar =  muhat + Gamma1/norm_x * xs 
     ustar += kappa(eps_k) * sig_term / norm_x / norm_x * xs
-    ustar, dot(ustar, xs)
+    dot(ustar, xs)*toggle, ustar
 end
-suppFcnRd(xs, w::UCSOracle) = suppFcnRd(xs, w.muhat, w.Gamma1, w.Gamma2, w.covbar, w.eps_kappa)
 
 # JuMPeR alerting us that we're handling this contraint
 function registerConstraint(w::UCSOracle, con, ind::Int, prefs)
@@ -88,7 +82,6 @@ function registerConstraint(w::UCSOracle, con, ind::Int, prefs)
     return [:Cut    =>  true]
 end
 
-#only supports continuous variables.  
 function setup(w::UCSOracle, rm::Model)
     w.setup_done && return
     rd = JuMPeR.getRobust(rm)
@@ -96,12 +89,20 @@ function setup(w::UCSOracle, rm::Model)
     d = size(w.covbar, 1)
     @assert (rd.numUncs == d) "Num Uncertainties doesn't match columns in data"
 
+    #w.cut_model.colCat   = rd.uncCat  #only supports continuous variables for now
+    @assert (length(rd.uncertaintyset) == 0) #does not support additional cnsts on unctertainties for now
 
-    #ignore any additional constraints on uncertainties for now
-    #w.cut_model.colCat   = rd.uncCat
-    println( length(rd.uncertaintyset) )
-    @assert (length(rd.uncertaintyset) == 0)
+    #if there are no bounds, can use the simpler support function
+    ##VG To add
+    w.unbounded_support = true
+    for i = 1:d
+        if (rd.uncLower[i] > -Inf) || (rd.uncUpper[i] < Inf )
+            w.unbounded_support=false
+            break
+        end
+    end
 
+    #else build an SOCP for separation
     @defVar(w.cut_model, rd.uncLower[i] <= us[i=1:d] <= rd.uncUpper[i])
     @defVar(w.cut_model, z1[1:d])
     @defVar(w.cut_model, z2[1:d])
@@ -110,8 +111,8 @@ function setup(w::UCSOracle, rm::Model)
         addConstraint(w.cut_model, us[i] == w.muhat[i] + z1[i] + dot(w.C[:, i], z2))
     end
 
-    addConstraint(w.cut_model, dot(z1, z1) <= w.Gamma1 )
-    addConstraint(w.cut_model, dot(z2, z2) <= kappa(w.eps_kappa))
+    addConstraint(w.cut_model, dot(z1, z1) <= w.Gamma1^2 )
+    addConstraint(w.cut_model, dot(z2, z2) <= kappa(w.eps_kappa)^2)
     w.cut_vars = us[:]
     w.setup_done = true
 end
@@ -127,11 +128,16 @@ function generateCut(w::UCSOracle, rm::Model, ind::Int, m::Model, cb=nothing, ac
     xs = zeros(length(coeffs))
     xs[[indx...]] = [coeffs...]
 
-    setObjective(w.cut_model, cut_sense, sum([xs[ix] * w.cut_vars[ix] for ix=1:d]))
-    cut_solve_status = solve(w.cut_model, suppress_warnings=true)
-    cut_solve_status != :Optimal && error("Cutting plane problem infeasible or unbounded!")
-    ustar = getValue(w.cut_vars)
-    lhs_of_cut = getObjectiveValue(w.cut_model) + lhs_const
+    if w.unbounded_support
+        zstar, ustar = suppFcnUCSRd(xs, w.muhat, w.Gamma1, w.Gamma2, w.covbar, w.eps_kappa, cut_sense)
+    else
+        setObjective(w.cut_model, cut_sense, sum([xs[ix] * w.cut_vars[ix] for ix=1:d]))
+        cut_solve_status = solve(w.cut_model, suppress_warnings=true)
+        cut_solve_status != :Optimal && error("Cutting plane problem infeasible or unbounded!")
+        ustar = getValue(w.cut_vars)
+        zstar = getObjectiveValue(w.cut_model)
+    end
+    lhs_of_cut = zstar + lhs_const
 
     #VG Correct this after Iain changes base JumPer
     # TEMPORARY: active cut detection 

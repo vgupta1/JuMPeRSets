@@ -110,3 +110,18 @@ function KSGamma(delta, N)
        denom = sqrt_N + .12 + .11/sqrt_N
        num/denom
 end
+
+function boot_mu(data, delta, numBoots)
+    const muhat = mean(data, 1)
+    myfun(data_b) = norm(mean(data_b, 1) - muhat)
+    boot(data, myfun, 1-delta, numBoots)
+end
+
+function boot_sigma(data, delta, numBoots)
+    const covhat = cov(data)
+    myfun(data_b) = normfro(cov(data_b) - covhat)
+    boot(data, myfun, 1-delta, numBoots)
+end
+
+
+

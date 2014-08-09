@@ -8,8 +8,9 @@ using JuMPeR  #VG Talk to Iain about removing this
 include("helpers.jl")
 include("FBOracle.jl")
 include("UIOracle.jl")
+include("UCSOracle.jl")
 
 end
 
-#VG kill this
+#VG kill this when moves to main path
 push!(LOAD_PATH, "/Users/VGupta/Documents/Research/DataDriven Uncertainty SEts/JuMPeRSet/")
