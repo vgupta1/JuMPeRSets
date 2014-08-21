@@ -10,10 +10,10 @@ export suppFcnFB
 #log_eps = log(1/eps_)
 #returns zstar, ustar
 function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
-    toggle = 1
+    sign_flip = 1
     if cut_sense == :Min
         xs = copy(-xs)
-        toggle = -1
+        sign_flip = -1
     end
     y1 = zeros(Float64, length(xs))
     y2 = zeros(Float64, length(xs))
@@ -37,7 +37,7 @@ function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
     y2 /= lam
     y3 /= lam
     ustar = y1 + y2 - y3
-    zstar = dot(xs, ustar) * toggle
+    zstar = dot(xs, ustar) * sign_flip
     return zstar, ustar
 end
 

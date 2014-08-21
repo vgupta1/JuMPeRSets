@@ -3,9 +3,10 @@
 ###
 module QExp
 
+include("../ddusets.jl")
+using Base.Test, DDUSets
+using JuMPeR
 using Distributions, Roots
-include("../FBOracle.jl")
-include("../UCSOracle.jl")
 
 #these are awkwardly stated in terms of arrival and service rates/ std. of arrivals and serivces
 king1(lam, mu, sigT, sigx) = ( rho = lam/mu; rho/(1-rho) * .5 * 1/mu * (sigT^2 * lam^2 + sigx^2 * mu^2) )
@@ -14,12 +15,19 @@ king2(lam, mu, sigT, sigX) = ( rho = lam/mu; lam/2/(1-rho) * (sigT^2 + sigX^2) )
 #more naturally in terms of means and stdsd
 kingProb(mu_a, mu_s, sig_a, sig_s, eps) = king1(1/mu_a, 1/mu_s, sig_a, sig_s) / eps
 
+########
 #Non-optimized choice of epsilons
-#TO BE Deprecate
+########
+#TO BE Deprecated
 FBBound(mbt, mfx, sigbt, sigfx, eps) = log(1/eps) * (sigfx^2 + sigbt^2) / 2 / (mbt-mfx)
+
+#Possible bug?
 UCSBound(mbt, mfx, sigt, sigx, eps) = (1/eps -1) * (sigt^2 + sigx^2) / 4 / (mbt - mfx)
 
+
+##########
 #optimizes choice of epsilons for the bound
+##########
 function UCSBound(mbt, mfx, sigt, sigx, epsbar, n)
 	mubar  = mfx - mbt
 	sigbar = sqrt(sigt^2 + sigx^2)
@@ -34,7 +42,6 @@ function UCSBound(mbt, mfx, sigt, sigx, epsbar, n)
 	fzero(f, [0., maxt])
 end
 
-#optimizes the choice of epsilons for the bound
 function FBBound(mbt, mfx, sigt, sigx, epsbar, n)
 	const mubar  = mfx - mbt
 	const sigbar = sqrt(sigt^2 + sigx^2)
@@ -66,13 +73,10 @@ function get_bpds(data_a, data_s)
 	bpds
 end
 
-#Copied from UIOracle... Should be moved to a central location
-#sup | Fhat - F | \leq Gamma
-DKWApprox(delta, N) = sqrt( log(2/delta)/N )
 
 #adjusted quantiles with DKW adjustment
 function bpd_quants(bpds, delta)
-	const Gamma  = DKWApprox(delta, length(bpds))
+	const Gamma  = KSGamma(delta, length(bpds))
 	const thresh = quantile(bpds, 1-Gamma)
 	pts = sort(filter(b->b <= thresh, unique(bpds)))
 	probs = [mean(bpds .< p) for p in pts] + Gamma
