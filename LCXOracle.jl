@@ -4,17 +4,19 @@
 # At the moment only supports cutting planes
 using JuMPeR
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
-include("bootstrap.jl")
+import JuMP.UnsetSolver
 
-#To Do
-# Write tests
+export LCXOracle
+export suppFcnLCX
+
+#VG To Do
 # Merge this and the sampling formulation via an appropriate argument to constructor
 
 #returns bool, violated ab_cut
 #Solves 4 LPs
 #VG take solver from user
-function ab_cut(us, vs, z, data, eps_, CASE)
-    m = Model(solver=GurobiSolver(OutputFlag=0))
+function ab_cut(us, vs, z, data, eps_, CASE; solver=GurobiSolver(OutputFlag=0))
+    m = Model(solver=solver)
     @defVar(m, a[1:2])
     @defVar(m, b)
 
@@ -75,8 +77,9 @@ end
 
 #returns zstar,ustar
 #VG Remove the dependency on GurobiSolver() explicitly and take frm user
-function suppFcnLCX(xs, data, eps_, Gamma, cut_sense; bound=1e6, TOL=1e-6, MAXITER=100, trace=false)
-    m = Model(solver=GurobiSolver(OutputFlag=0))
+function suppFcnLCX(xs, data, eps_, Gamma, cut_sense; 
+        bound=1e6, TOL=1e-6, MAXITER=100, trace=false, solver=GurobiSolver(OutputFlag=0))
+    m = Model(solver=solver)
     @defVar(m, -bound <= us[1:2] <= bound)
     @defVar(m, vs[1:2])
     @defVar(m, 1 <= z <= 1/eps_)
@@ -112,77 +115,13 @@ function suppFcnLCX(xs, data, eps_, Gamma, cut_sense; bound=1e6, TOL=1e-6, MAXIT
     end
     getObjectiveValue(m), getValue(us[:])    
 end
-
-########################
-# Bootstrapping computation
-
-#Returns indx of last instance of val, 0 if not found
-#Assumes sorted_list, and sort_list[start] >= val
-function findlast_sort(val::Float64, sort_list::Vector; TOL::Float64=1e-10, start::Int64=1)
-    i::Int64 = 1
-    for i = int(start):length(sort_list)
-        if abs(val - sort_list[i]) > TOL
-            break
-        end
-    end
-    i-1
-end
-
-## Makes a single pass through zetas/zetahats to solve
-# 1/N * max_b { sum_i [zeta_i - b] ^+ - sum_i[zetahat_i - b]^+ }
-function singlepass!(zetas::Vector, zetahats::Vector)
-    sort!(zetas)  
-    sort!(zetahats)
-
-    vstar::Float64 = mean(zetas) - zetas[1] 
-    vb::Float64    = mean(zetahats) - zetas[1]
-
-    Gamma::Float64 = vstar - vb
-    const N::Int64 = length(zetas)
-    pbar::Float64    = 1.0 
-    hat_indx::Int64  = 1
-    hat_indx_::Int64 = 0
-    
-    for k = 2:length(zetas)
-        vstar += (zetas[k-1] - zetas[k]) * (N-k+1)/N
-        hat_indx = findlast_sort(zetas[k-1], zetahats, start=hat_indx_ + 1)
-        pbar -=  (hat_indx - hat_indx_)/N
-        hat_indx_ = hat_indx
-        vb  += (zetas[k-1] - zetas[k]) * pbar
-        Gamma = max(Gamma, vstar - vb)
-    end
-    Gamma
-end
-
-#a::Vector is used as storage between bootstraps
-function f2(boot_sample::Matrix, data::Matrix, numSamples::Int, a::Vector)
-    Gamma::Float64 = 0.
-    for i = 1:numSamples
-        randn!(a)
-        a /= norm(a)
-        Gamma = max(Gamma, singlepass!(data*a, boot_sample*a))
-    end
-    Gamma
-end
-
-#Approximates the threshold by sampling a bunch of abs for each bootstrap rep
-function calc_ab_thresh(data::Matrix, delta::Float64, numBoots::Int, numSamples::Int)
-    const N = size(data, 1)
-    const d = size(data, 2)
-    a::Vector{Float64} = zeros(Float64, d)
-    boot(data, f2, 1-delta, numBoots, data, numSamples, a)
-end
+suppFcnLCX(xs, w, cut_sense) = suppFcnLCX(xs, w.data, w.eps_, w.Gamma, cut_sense)
 
 ########################
 type LCXOracle <: AbstractOracle
-    cons::Dict{Int, UncConstraint} #[cnst index master problem => unc. cnst]
-    setup_done::Bool
-
     data::Array{Float64, 2}
     eps_::Float64
     Gamma::Float64
-
-    # Cutting plane algorithm
     cut_tol::Float64  ##defaults to 1e-6
 
     # Other options
@@ -193,76 +132,60 @@ function LCXOracle(data, eps_; cut_tol=1e-6, debug_printcut=false,
                     numSamples=int(1e4), numBoots=int(1e4), delta=.2) 
     @assert (0 < eps_ < 1) "Epsilon invalid: $eps_"
     Gamma = calc_ab_thresh(data, delta, numBoots, numSamples)
-    LCXOracle(Dict{Int,UncConstraint}(), false, data, eps_, Gamma, cut_tol, debug_printcut)
+    LCXOracle(data, eps_, Gamma, cut_tol, debug_printcut)
 end
 
 LCXOracle(data, eps_, Gamma; cut_tol=1e-6, debug_printcut=false) = 
     ( @assert (0 < eps_ < 1) "Epsilon invalid: $eps_";
-    LCXOracle(Dict{Int,UncConstraint}(), false, data, eps_, Gamma, cut_tol, debug_printcut) )
+    LCXOracle(data, eps_, Gamma, cut_tol, debug_printcut) )
 
 # JuMPeR alerting us that we're handling this contraint
-function registerConstraint(w::LCXOracle, con, ind::Int, prefs)
-	! get(prefs, :prefer_cuts, true) && error("Only cutting plane supported")
-    w.cons[ind] = con
+registerConstraint(w::LCXOracle, rm::Model, ind::Int, prefs) = 
+    ! get(prefs, :prefer_cuts, true) && error("Only cutting plane supported")
 
-    # Extract preferences we care about
-    w.debug_printcut    = get(prefs, :debug_printcut, false)
-    haskey(prefs, :cut_tol) && ( w.cut_tol = prefs[:cut_tol] )
-    return [:Cut    =>  true]
-end
 
-#only supports continuous variables.  
-function setup(w::LCXOracle, rm::Model)
-    w.setup_done && return
+function setup(w::LCXOracle, rm::Model, prefs)
     rd = JuMPeR.getRobust(rm)
-    @assert (rd.numUncs == size(w.data, 2)) "Num Uncertainties doesn't match columns in data"
-
-    #ignore any additional constraints on uncertainties for now
-    #w.cut_model.colCat   = rd.uncCat
+    @assert (rd.numUncs == size(w.data, 2)) "Num Uncertainties $(rd.numUncs) doesn't match columns in data $(size(w.data, 2))"
     @assert (length(rd.uncertaintyset) == 0) "Auxiliary constraints on uncertainties not yet supported"
 
-    w.setup_done = true
+    # Extract preferences we care about
+    w.debug_printcut = get(prefs, :debug_printcut, false)
+    w.cut_tol        = get(prefs, :cut_tol, w.cut_tol)
 end
 
-function generateCut(w::LCXOracle, rm::Model, ind::Int, m::Model, cb=nothing, active=false)
-    # Update the cutting plane problem's objective
-    con = w.cons[ind]
-    cut_sense, unc_obj_coeffs, lhs_const = JuMPeR.build_cut_objective(con, m.colVal) #m.colVal= master_sol
-    
-    #Unscramble
-    indx, coeffs = zip(unc_obj_coeffs...)
-    d = size(w.data, 2)
-    xs = zeros(length(coeffs))
-    xs[[indx...]] = [coeffs...]
-
-    zstar, ustar = suppFcnLCX(xs, w.data, w.eps_, w.Gamma, cut_sense)
-    lhs_of_cut = zstar + lhs_const
-
-    #VG Correct this after Iain changes base JumPer
-    # TEMPORARY: active cut detection 
+function generateCut(w::LCXOracle, m::Model, rm::Model, inds::Vector{Int}, active=false)
+    new_cons = {}
     rd = JuMPeR.getRobust(rm)
-    if active && (
-       ((JuMPeR.sense(con) == :<=) && (abs(lhs_of_cut - con.ub) <= w.cut_tol)) ||
-       ((JuMPeR.sense(con) == :>=) && (abs(lhs_of_cut - con.lb) <= w.cut_tol)))
-        # Yup its active
-        push!(rd.activecuts, ustar[:])
+
+    for ind in inds
+        con = JuMPeR.get_uncertain_constraint(rm, ind)
+        cut_sense, xs, lhs_const = JuMPeR.build_cut_objective(rm, con, m.colVal) #m.colVal= master_sol
+        d = size(w.data, 2)
+        zstar, ustar = suppFcnLCX(xs, w, cut_sense)
+        lhs_of_cut = zstar + lhs_const
+
+        # SUBJECT TO CHANGE: active cut detection
+        if active
+            push!(rd.activecuts[ind], 
+                JuMPeR.cut_to_scen(ustar, 
+                    JuMPeR.check_cut_status(con, lhs_of_cut, w.cut_tol) == :Active))
+            continue
+        end
+
+        # Check violation
+        if JuMPeR.check_cut_status(con, lhs_of_cut, w.cut_tol) != :Violate
+            w.debug_printcut && JuMPeR.debug_printcut(rm ,m,w,lhs_of_cut,con,nothing)
+            continue  # No violation, no new cut
+        end
+        
+        # Create and add the new constraint
+        new_con = JuMPeR.build_certain_constraint(m, con, ustar)
+        w.debug_printcut && JuMPeR.debug_printcut(rm, m, w, lhs_of_cut, con, new_con)
+        push!(new_cons, new_con)
     end
-    
-    # Check violation
-    if !JuMPeR.is_constraint_violated(con, lhs_of_cut, w.cut_tol)
-        w.debug_printcut && debug_printcut(rm, m, w, lhs_of_cut,con, nothing)
-        return 0  # No new cut
-    end
-    
-    # Create and add the new constraint
-    new_con = JuMPeR.build_certain_constraint(con, ustar[:])  #VG correct after Iain updates
-    w.debug_printcut && debug_printcut(rm, m, w, lhs_of_cut, con,new_con)
-    cb == nothing ? addConstraint(m, new_con) :
-                    addLazyConstraint(cb, new_con)
-    return 1
+    return new_cons
 end
 
 #Shouldn't be called
-function generateReform(w::LCXOracle, rm::Model, ind::Int, master::Model)
-	return false
-end
+generateReform(w::LCXOracle, m::Model, rm::Model, inds::Vector{Int}) = 0

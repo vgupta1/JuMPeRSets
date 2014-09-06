@@ -2,10 +2,10 @@
 # UCS Oracle 
 ###
 # At the moment only supports cutting planes
-#using JuMPeR
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
+import JuMP.UnsetSolver
 
-using Gurobi
+using Gurobi  #VG drop this dependency
 
 export UCSOracle
 export suppFcnUCSRd
@@ -17,9 +17,6 @@ export suppFcnUCSRd
 # Write tests
 
 type UCSOracle <: AbstractOracle
-    cons::Dict{Int, UncConstraint} #[cnst index master problem => unc. cnst]
-    setup_done::Bool
-
     eps_kappa::Float64
     Gamma1::Float64
     Gamma2::Float64
@@ -37,21 +34,20 @@ type UCSOracle <: AbstractOracle
     debug_printcut::Bool
 end
 
-function UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_; cut_tol = 1e-6)
+function UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_)
     covbar = covhat + Gamma2 * eye(size(covhat)...)
     C = chol(covbar, :U)   #C'C = covbar
-    UCSOracle(  Dict{Int, UncConstraint}(), false, 
-                eps_, Gamma1, Gamma2, muhat, covbar, C, 
-                cut_tol, Model(solver=GurobiSolver(OutputFlag=false)), Variable[], false, false)  
+    UCSOracle(  eps_, Gamma1, Gamma2, muhat, covbar, C, 
+                1e-6, Model(), Variable[], false, false)  
 end
 
 #preferred interface
-function UCSOracle(data, eps_, delta1, delta2; numBoots=10000, cut_tol=1e-6)
+function UCSOracle(data, eps_, delta1, delta2; numBoots=10000)
     muhat  = vec(mean(data, 1))
     covhat = cov(data)
     Gamma1 = boot_mu(data, delta1, numBoots)
     Gamma2 = boot_sigma(data, delta2, numBoots)
-    UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_, cut_tol=cut_tol)
+    UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_)
 end
 
 
@@ -70,27 +66,26 @@ function suppFcnUCSRd(xs, muhat, Gamma1, Gamma2, covbar, eps_k, cut_sense=:Max)
     ustar += kappa(eps_k) * sig_term / norm_x / norm_x * xs
     dot(ustar, xs)*toggle, ustar
 end
+suppFcnUCSRd(xs, w, cut_sense) = 
+    suppFcnUCSRd(xs, w.muhat, w.Gamma1, w.Gamma2, w.covbar, w.eps_kappa, cut_sense)
+
 
 # JuMPeR alerting us that we're handling this contraint
-function registerConstraint(w::UCSOracle, con, ind::Int, prefs)
+registerConstraint(w::UCSOracle, rm::Model, ind::Int, prefs) = 
 	! get(prefs, :prefer_cuts, true) && error("Only cutting plane supported")
-    w.cons[ind] = con
 
+function setup(w::UCSOracle, rm::Model, prefs)
     # Extract preferences we care about
-    w.debug_printcut    = get(prefs, :debug_printcut, false)
-    haskey(prefs, :cut_tol) && ( w.cut_tol = prefs[:cut_tol] )
-    return [:Cut    =>  true]
-end
+    w.debug_printcut = get(prefs, :debug_printcut, false)
+    w.cut_tol        = get(prefs, :cut_tol, w.cut_tol)
 
-function setup(w::UCSOracle, rm::Model)
-    w.setup_done && return
     rd = JuMPeR.getRobust(rm)
-    w.cut_model.solver   = rd.cutsolver == nothing ? rm.solver : rd.cutsolver
+    w.cut_model.solver   = isa(rd.cutsolver, UnsetSolver) ? rm.solver : rd.cutsolver
+
     d = size(w.covbar, 1)
     @assert (rd.numUncs == d) "Num Uncertainties doesn't match columns in data"
-
-    #w.cut_model.colCat   = rd.uncCat  #only supports continuous variables for now
     @assert (length(rd.uncertaintyset) == 0) #does not support additional cnsts on unctertainties for now
+    #w.cut_model.colCat   = rd.uncCat  #only supports continuous variables for now
 
     #if there are no bounds, can use the simpler support function
     ##VG To add
@@ -114,56 +109,53 @@ function setup(w::UCSOracle, rm::Model)
     addConstraint(w.cut_model, dot(z1, z1) <= w.Gamma1^2 )
     addConstraint(w.cut_model, dot(z2, z2) <= kappa(w.eps_kappa)^2)
     w.cut_vars = us[:]
-    w.setup_done = true
 end
 
-function generateCut(w::UCSOracle, rm::Model, ind::Int, m::Model, cb=nothing, active=false)
-    # Update the cutting plane problem's objective
-    con = w.cons[ind]
-    cut_sense, unc_obj_coeffs, lhs_const = JuMPeR.build_cut_objective(con, m.colVal) #m.colVal= master_sol
-    
-    #Unscramble
-    indx, coeffs = zip(unc_obj_coeffs...)
-    d = size(w.covbar, 1)
-    xs = zeros(length(coeffs))
-    xs[[indx...]] = [coeffs...]
-
-    if w.unbounded_support
-        zstar, ustar = suppFcnUCSRd(xs, w.muhat, w.Gamma1, w.Gamma2, w.covbar, w.eps_kappa, cut_sense)
-    else
-        setObjective(w.cut_model, cut_sense, sum([xs[ix] * w.cut_vars[ix] for ix=1:d]))
-        cut_solve_status = solve(w.cut_model, suppress_warnings=true)
-        cut_solve_status != :Optimal && error("Cutting plane problem infeasible or unbounded!")
-        ustar = getValue(w.cut_vars)
-        zstar = getObjectiveValue(w.cut_model)
-    end
-    lhs_of_cut = zstar + lhs_const
-
-    #VG Correct this after Iain changes base JumPer
-    # TEMPORARY: active cut detection 
+function generateCut(w::UCSOracle, m::Model, rm::Model, inds::Vector{Int}, active=false)
     rd = JuMPeR.getRobust(rm)
-    if active && (
-       ((JuMPeR.sense(con) == :<=) && (abs(lhs_of_cut - con.ub) <= w.cut_tol)) ||
-       ((JuMPeR.sense(con) == :>=) && (abs(lhs_of_cut - con.lb) <= w.cut_tol)))
-        # Yup its active
-        push!(rd.activecuts, ustar[:])
+    master_sol = m.colVal
+    new_cons = {}
+
+    for ind in inds
+        # Update the cutting plane problem's objective
+        con = JuMPeR.get_uncertain_constraint(rm, ind)
+        #VG This should move to sparse notation
+        cut_sense, unc_obj_coeffs, lhs_const = 
+                JuMPeR.build_cut_objective(rm, con, master_sol)
+        
+        if w.unbounded_support
+            zstar, ustar = suppFcnUCSRd(unc_obj_coeffs, w, cut_sense)
+        else
+            setObjective(w.cut_model, cut_sense, sum([unc_obj_coeffs[ix] * w.cut_vars[ix] for ix=1:length(w.cut_vars)]))
+
+            cut_solve_status = solve(w.cut_model, suppress_warnings=true)
+            cut_solve_status != :Optimal && error("Cutting plane problem failed: $cut_solve_status")
+            ustar = getValue(w.cut_vars)
+            zstar = getObjectiveValue(w.cut_model)
+        end
+        lhs_of_cut = zstar + lhs_const
+
+        # SUBJECT TO CHANGE: active cut detection
+        if active
+            push!(rd.activecuts[ind], 
+                JuMPeR.cut_to_scen(ustar, 
+                    JuMPeR.check_cut_status(con, lhs_of_cut, w.cut_tol) == :Active))
+            continue
+        end
+
+        # Check violation
+        if JuMPeR.check_cut_status(con, lhs_of_cut, w.cut_tol) != :Violate
+            w.debug_printcut && JuMPeR.debug_printcut(rm ,m,w,lhs_of_cut,con,nothing)
+            continue  # No violation, no new cut
+        end
+        
+        # Create and add the new constraint
+        new_con = JuMPeR.build_certain_constraint(m, con, ustar)
+
+        w.debug_printcut && JuMPeR.debug_printcut(rm, m, w, lhs_of_cut, con, new_con)
+        push!(new_cons, new_con)
     end
-    
-    # Check violation
-    if !JuMPeR.is_constraint_violated(con, lhs_of_cut, w.cut_tol)
-        w.debug_printcut && debug_printcut(rm, m, w, lhs_of_cut,con, nothing)
-        return 0  # No new cut
-    end
-    
-    # Create and add the new constraint
-    new_con = JuMPeR.build_certain_constraint(con, ustar[:])  #VG correct after Iain updates
-    w.debug_printcut && debug_printcut(rm, m, w, lhs_of_cut, con,new_con)
-    cb == nothing ? addConstraint(m, new_con) :
-                    addLazyConstraint(cb, new_con)
-    return 1
+    return new_cons
 end
 
-#VG shouldn't be called
-function generateReform(w::UCSOracle, rm::Model, ind::Int, master::Model)
-	return false
-end
+generateReform(w::UCSOracle, m::Model, rm::Model, inds::Vector{Int}) = 0

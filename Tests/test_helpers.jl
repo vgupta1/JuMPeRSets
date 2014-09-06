@@ -2,7 +2,7 @@
 
 using JuMPeR
 using Gurobi
-function portTest(oracle, zstar_val, ustar_vals; unc_lower=nothing, unc_upper=nothing, TOL=1e-12)
+function portTest(oracle, zstar_val, ustar_vals; unc_lower=nothing, unc_upper=nothing, TOL=1e-7)
 	m = RobustModel(solver=GurobiSolver(OutputFlag=0))
 	if unc_lower != nothing
 		@defUnc(m, unc_lower[i] <= us[i=1:2] <= unc_upper[i])

@@ -3,6 +3,7 @@
 ###
 # At the moment only supports cutting planes
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
+import JuMP.UnsetSolver
 
 export FBOracle
 export suppFcnFB
@@ -40,11 +41,10 @@ function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
     zstar = dot(xs, ustar) * sign_flip
     return zstar, ustar
 end
+suppFcnFB(xs, w, cut_sense) = 
+    suppFcnFB(xs, w.mfs, w.mbs, w.sigfs, w.sigbs, w.log_eps, cut_sense)
 
 type FBOracle <: AbstractOracle
-    cons::Dict{Int, UncConstraint} #[cnst index master problem => unc. cnst]
-    setup_done::Bool
-
     mfs::Vector{Float64}
     mbs::Vector{Float64}
     sigfs::Vector{Float64}
@@ -59,7 +59,7 @@ type FBOracle <: AbstractOracle
 end
 
 FBOracle(mfs, mbs, sigfs, sigbs, eps; TOL=1e-6) = 
-    FBOracle(Dict{Int, UncConstraint}(), true, mfs, mbs, sigfs, sigbs, log(1/eps), TOL, false)
+    FBOracle(mfs, mbs, sigfs, sigbs, log(1/eps), TOL, false)
 
 #Preferred constructors
 function FBOracle(data, eps, delta1, delta2; CUT_TOL=1e-6, numBoots=int(1e4))
@@ -80,69 +80,57 @@ FBOracle(data, eps, delta; CUT_TOL=1e-6, numBoots=int(1e4)) =
 
 
 # JuMPeR alerting us that we're handling this contraint
-function registerConstraint(w::FBOracle, con, ind::Int, prefs)
+registerConstraint(w::FBOracle, rm::Model, ind::Int, prefs) = 
 	! get(prefs, :prefer_cuts, true) && error("Only cutting plane supported")
-    w.cons[ind] = con
 
+function setup(w::FBOracle, rm::Model, prefs)
     # Extract preferences we care about
-    w.debug_printcut    = get(prefs, :debug_printcut, false)
-    haskey(prefs, :cut_tol) && ( w.cut_tol = prefs[:cut_tol] )
-    return [:Cut    =>  true]
-end
+    w.debug_printcut = get(prefs, :debug_printcut, false)
+    w.cut_tol        = get(prefs, :cut_tol, w.cut_tol)
 
-function setup(w::FBOracle , rm::Model)
-    w.setup_done && return
     rd = JuMPeR.getRobust(rm)
-    @assert (rd.numUncs == size(w.mfs, 2)) "Num Uncertainties doesn't match columns in data"
-    @assert (length(mfs) == length(mbs) == length(sigfs) == length(sigbs)) "Lengths of means and fb devs dont match uncertainties"
+    @assert (rd.numUncs == length(w.mfs)) "Num Uncertainties $(rd.numUncs) doesn't match columns in data $(size(w.mfs))"
+    @assert (length(w.mfs) == length(w.mbs) == length(w.sigfs) == length(w.sigbs)) "Lengths of means and fb devs dont match uncertainties"
 
     #ignore any additional constraints on uncertainties for now
-    #w.cut_model.colCat   = rd.uncCat
     @assert (length(rd.uncertaintyset) == 0) "Auxiliary constraints on uncertainties not yet supported"
-    w.setup_done = true
 end
 
-function generateCut(w::FBOracle   , rm::Model, ind::Int, m::Model, cb=nothing, active=false)
-    # Update the cutting plane problem's objective
-    con = w.cons[ind]
-    cut_sense, unc_obj_coeffs, lhs_const = JuMPeR.build_cut_objective(con, m.colVal) #m.colVal= master_sol
-    
-    #Unscramble
-    indx, coeffs = zip(unc_obj_coeffs...)
-    d = size(w.mfs, 2)
-    xs = zeros(length(coeffs))
-    xs[[indx...]] = [coeffs...]
-
-    zstar, ustar = suppFcnFB(xs, w.mfs, w.mbs, w.sigfs, w.sigbs, w.log_eps, cut_sense)
-    lhs_of_cut = zstar + lhs_const
-
-    #VG Correct this after Iain changes base JumPer
-    # TEMPORARY: active cut detection 
+function generateCut(w::FBOracle, m::Model, rm::Model, inds::Vector{Int}, active=false)
+    new_cons = {}
     rd = JuMPeR.getRobust(rm)
-    if active && (
-       ((JuMPeR.sense(con) == :<=) && (abs(lhs_of_cut - con.ub) <= w.cut_tol)) ||
-       ((JuMPeR.sense(con) == :>=) && (abs(lhs_of_cut - con.lb) <= w.cut_tol)))
-        # Yup its active
-        push!(rd.activecuts, ustar[:])
+
+    for ind in inds
+        # Update the cutting plane problem's objective
+        # VG should move to sparse build_cut
+        con = JuMPeR.get_uncertain_constraint(rm, ind)
+        cut_sense, xs, lhs_const = JuMPeR.build_cut_objective(rm, con, m.colVal)
+        zstar, ustar = suppFcnFB(xs, w, cut_sense) 
+        lhs_of_cut = zstar + lhs_const
+
+        # SUBJECT TO CHANGE: active cut detection
+        if active
+            push!(rd.activecuts[ind], 
+                JuMPeR.cut_to_scen(ustar, 
+                    JuMPeR.check_cut_status(con, lhs_of_cut, w.cut_tol) == :Active))
+            continue
+        end
+
+        # Check violation
+        if JuMPeR.check_cut_status(con, lhs_of_cut, w.cut_tol) != :Violate
+            w.debug_printcut && JuMPeR.debug_printcut(rm ,m,w,lhs_of_cut,con,nothing)
+            continue  # No violation, no new cut
+        end
+        
+        # Create and add the new constraint
+        new_con = JuMPeR.build_certain_constraint(m, con, ustar)
+        w.debug_printcut && JuMPeR.debug_printcut(rm, m, w, lhs_of_cut, con, new_con)
+        push!(new_cons, new_con)
     end
-    
-    # Check violation
-    if !JuMPeR.is_constraint_violated(con, lhs_of_cut, w.cut_tol)
-        w.debug_printcut && debug_printcut(rm, m, w, lhs_of_cut,con, nothing)
-        return 0  # No new cut
-    end
-    
-    # Create and add the new constraint
-    new_con = JuMPeR.build_certain_constraint(con, ustar[:])  #VG correct after Iain updates
-    w.debug_printcut && debug_printcut(rm, m, w, lhs_of_cut, con,new_con)
-    cb == nothing ? addConstraint(m, new_con) :
-                    addLazyConstraint(cb, new_con)
-    return 1
+    return new_cons
 end
 
 #Shouldn't be called
-function generateReform(w::FBOracle, rm::Model, ind::Int, master::Model)
-	return false
-end
+generateReform(w::FBOracle, m::Model, rm::Model, inds::Vector{Int}) = 0
 
 
