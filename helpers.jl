@@ -2,7 +2,8 @@
 # Helpers
 ###
 # Contains statistical and other routines used by data-driven sets
-using Distributions, Optim
+using Distributions, Optim, Roots
+
 
 ###Bootstrapping code
 # ideally this should all be moved to some base level function
@@ -122,6 +123,56 @@ function boot_sigma(data, delta, numBoots)
     const covhat = cov(data)
     myfun(data_b) = vecnorm(cov(data_b) - covhat)
     boot(data, myfun, 1-delta, numBoots)
+end
+
+function bootDY_mu(data, delta, numBoots)
+    muhat = mean(data, 1)
+    myfun(data_b) = (mu = mean(data_b, 1); ((mu-muhat) * inv(cov(data)) * (mu-muhat)')[1])
+    boot(data, myfun, 1-delta, numBoots)
+end 
+
+function bootDY_sigma(data, delta, numBoots)
+    mu0  = mean(data, 1)
+    sig0 = cov(data)
+   
+    function myfun(data_b)
+        muhat = mean(data_b, 1)
+        sighat = cov(data_b)
+        mudiff = (mu0 - muhat)'*(mu0-muhat)
+        f(g2) = eigmin(g2*sighat - sig0 -mudiff)
+
+        #solve
+        try       
+            fzero(f, [.01, 500])
+        catch e
+            show(e); println()
+            println("Using Manual Bracketing")
+            #do your own bracketing
+            if f(1) < 0
+                lb = 1; ub = 2
+                while f(ub) < 0
+                    lb = ub
+                    ub = ub * 2
+                end
+            else
+                lb = .5; ub = 1
+                while f(lb) > 0
+                    ub = lb
+                    lb = lb * .5
+                end
+            end
+            try
+                fzero(f, [lb, ub])
+            catch e2
+                println("Manual bracketing failed")
+                for i = 10.0.^[-2:5]
+                    println(f(i))
+                end
+            end
+        end
+
+   end
+   boot(data, myfun, 1-delta, numBoots)
 end
 
 ########
