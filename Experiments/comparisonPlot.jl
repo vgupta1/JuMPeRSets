@@ -47,9 +47,9 @@ function saveExp(cuts, path)
 	close(f)
 end
 
-# data = randn(500, 2)
-# #w = UIOracle(data, [-5., -5.], [5., 5.], .1, .1)
-# w = FBOracle(data, .1, .2)
-# out = createSuppFcnPlot(w, numDirs = 20)
+#For the LCX plot
+# 100 sample points, Gamma = .060  (beta densities)
+# 1000 sample points, GAmma = .017
+
 
 end
