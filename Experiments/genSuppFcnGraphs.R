@@ -1,11 +1,7 @@
-#VG Fix the experiment to distinguish between pstar and phat
-#http://blog.revolutionanalytics.com/2012/09/how-to-use-your-favorite-fonts-in-r-charts.html
-#Run that to get the font to look same as latex document
-#Add the anotations for the true probabilities
-
-# Making plots for the discrete sets from output
+# Making plots for the suppFcns from output
 
 library(ggplot2)
+library(extrafont)
 setwd("/Users/vishalgupta/Documents/Research/DataDriven Uncertainty SEts/JuMPeRSets/Experiments/")
 
 ### Data for the outer octagon
@@ -69,29 +65,72 @@ height = width / 5.15 * 4.18 - .25
 ggsave("../../Tex Documents/OR_Submission_v2/Figures/disSets1.pdf", 
        g1a, height=height, width=width)
 
-# g1 <- g + geom_path(aes(x=u1, y=u2, group=factor(N)), 
-#        data=subset(dat2, N %in% c(100, 1000, 10000)), 
-#        color="red", linetype=5) 
-  
-#add the paths for the G
-# g2 <- g1 + geom_path(aes(x=u1, y=u2, group=N), 
-#                data=subset(datG, N %in% c(100, 1000, 10000)), 
-#                color="blue", linetype=1) + 
-#   scale_linetype_manual(breaks=c("100","1000", "10000"), 
-#                         values=c(5,1, 3), name="N")
-         
-# g2 
-
 ggsave("disc_sets.pdf", g1a)
 
 
+########### 
+# Similar set of plots for the UI and UFB sets
+###########
+datFB = read.csv(file ="UFB_100.csv")
+datFB$Method = "FB"
+datUI = read.csv(file="UICuts_100.csv")
+datUI$Method = "UI"
+dat_raw = read.csv("dat_100.csv", header=FALSE)
 
-ggplot(aes(x=u1, y=u2), data=datChiSq) + 
-  geom_point(aes(x=X1, y=X2), color="red", data=data.frame(A)) +  
-  geom_path(linetype="dotted") + 
-  geom_path(data=datG) + 
-    theme_bw(base_size=12) + 
-  xlab("") + ylab("")
+datFBInf = read.csv(file ="FBCuts_Inf.csv")
+datFBInf$Method = "FB"
+datUIInf = read.csv(file="UICuts_Inf.csv")
+datUIInf$Method = "UI"
 
+#massaging some data to improve plots
+datFB = rbind(datFB, datFB[1, ])
+datUI = rbind(datUI, datUI[1, ])
+datUI$zstar[50] = 1
+datUI$u2[50] = 1
+datUI$zstar[150] = -1
+datUI$u2[150] = -1
+datFBInf = rbind(datFBInf, datFBInf[1, ])
+datUIInf = rbind(datUIInf, datUIInf[1, ])
+datUIInf$zstar[150] = -1
+datUIInf$u2[150] = -1
+
+dat = rbind(datFB, datUI, datFBInf, datUIInf)
+dat$ID = paste(dat$Method, dat$N, sep="_")
+
+##VG To do:  
+#Repair the top portio of the graph and bottom portions to get linkage
+#trip the top of the plot to get more bang for buck...
+#Figure out a better color/labeling scheme..
+#Add a dotted lien for the unit square
+#use heavier lines to distinguish between two sets
+
+g<- ggplot(aes(x=u1, y=u2), 
+           data=subset(dat, u2>=-1)) + 
+  geom_path(aes(group=ID, size=Method, color=factor(N), linetype=Method)) + 
+  theme_bw(base_size=10) + 
+  theme(text=element_text(family=font), 
+        legend.title=element_blank(), 
+        legend.position="right") +
+  xlab(expression(u[1])) + ylab(expression(u[2])) + 
+  geom_point(aes(x=V1, y=V2), data=dat_raw, color="blue", alpha=.5) + 
+  scale_linetype_discrete(breaks=c("FB", "UI"), 
+                       labels=c(expression(U^{FB}), expression(U^I))) +
+  scale_size_manual(values=c(.8, 1.5), guide=FALSE) + 
+  scale_color_manual(breaks=c("100", "1e+06"), 
+                     values=c("black", "blue"), 
+                     labels=c("100", expression(infinity)))
+
+#Add a bounding box
+box  = data.frame(matrix(c(1,          1,  
+                          1,        -1,
+                          -1,       -1,
+                          -1,        1, 
+                         1,          1), nrow=5, byrow=TRUE))
+g<- g + geom_path(aes(x=X1, y=X2), data=box, linetype="dotted", color="black")
+g<- g + xlim(-1, 1.4) + theme(legend.position=c(.9, .5))
+
+
+ggsave("../../Tex Documents/OR_Submission_v2/Figures/UFB_UI_Comp.pdf", 
+       g, width=.65 * 6.5, height=2.2)
 
 

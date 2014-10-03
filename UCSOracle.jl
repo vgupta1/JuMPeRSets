@@ -41,7 +41,6 @@ function UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_)
                 1e-6, Model(), Variable[], false, false)  
 end
 
-#preferred interface
 function UCSOracle(data, eps_, delta1, delta2; numBoots=10000)
     muhat  = vec(mean(data, 1))
     covhat = cov(data)
@@ -50,6 +49,8 @@ function UCSOracle(data, eps_, delta1, delta2; numBoots=10000)
     UCSOracle(muhat, covhat, Gamma1, Gamma2, eps_)
 end
 
+#preferred interface
+UCSOracle(data, eps_, delta; numBoots=10000) = UCSOracle(data, eps_, delta/2, delta/2, numBoots=numBoots)
 
 kappa(eps_) = sqrt(1./eps_ - 1.)
 
@@ -151,7 +152,6 @@ function generateCut(w::UCSOracle, m::Model, rm::Model, inds::Vector{Int}, activ
         
         # Create and add the new constraint
         new_con = JuMPeR.build_certain_constraint(m, con, ustar)
-
         w.debug_printcut && JuMPeR.debug_printcut(rm, m, w, lhs_of_cut, con, new_con)
         push!(new_cons, new_con)
     end

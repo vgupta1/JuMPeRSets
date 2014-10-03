@@ -16,10 +16,10 @@ g<- ggplot(aes(x=x_grid, y=U1), data=dat) + geom_line(color="red") +
   xlab("") + ylab("") + 
   ylim(0, 4)
 
-g<- g + annotate("text", x=.25, y=2.1, label="u[1]", parse=TRUE, family=font) + 
-    annotate("text", x=-.7, y=2.1, label="u[2]", parse=TRUE, family=font) +
+g1<- g + annotate("text", x=.27, y=2.1, label="u[1]", parse=TRUE, family=font) + 
+    annotate("text", x=-.66, y=2.1, label="u[2]", parse=TRUE, family=font) +
   ylim(0, 2.5)
 
-ggsave("/Users/vishalgupta/Documents/Research/DataDriven Uncertainty SEts/Tex Documents/OR_Submission_v2/Figures/betaDensity.pdf", 
-       g, width=3, height=2, units="in")
+ggsave("../../Tex Documents/OR_Submission_v2/Figures/betaDensity.pdf", 
+       g1, width=.35 * 6.5, height=2.2)
 

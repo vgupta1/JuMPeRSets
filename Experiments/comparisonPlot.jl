@@ -2,12 +2,16 @@
 # Supp Fcn Plots
 # Just testing for now... to be updated
 ####
-using Gurobi
-include("UCSOracle.jl")
-include("LCXSample.jl")
-include("LCXOracle.jl")
-include("FBOracle.jl")
-include("UIOracle.jl")
+include("../ddusets.jl")  #VG should be dropped
+using DDUSets
+
+module SP
+using Gurobi, Distributions, JuMPeR
+
+function simData(N)
+	d1 = Beta(4, 4); d2 = Beta(.4, 2)
+	[2 * rand(d1, N)-1  2*rand(d2, N)-1]
+end
 
 function createSuppFcnPlot(oracle::AbstractOracle; numDirs=200, bounds=nothing)
 	out = Array(Float64, numDirs, 5)	
@@ -20,52 +24,32 @@ function createSuppFcnPlot(oracle::AbstractOracle; numDirs=200, bounds=nothing)
 		else
 			@defUnc(m, us[i=1:2])
 		end
-		setDefaultOracle!(m, w)
+		setDefaultOracle!(m, oracle)
 
 		theta = 2pi / numDirs * ix
-		addConstraint(m, cos(theta) * us[1] + sin(theta) * us[2] <= t)
+		cr = addConstraint(m, cos(theta) * us[1] + sin(theta) * us[2] <= t)
 		@setObjective(m, Min, t)
 		solveRobust(m, active_cuts=true, prefer_cuts=true, report=false)
 
 		#extract the cut itself
 		rd = JuMPeR.getRobust(m)
-		ustar = transpose(rd.activecuts[1][1:2])
-		out[ix, :] = [cos(theta) sin(theta) getValue(t) ustar]
+		ustar = getScenario(cr).data
+		#ustar = transpose(rd.activecuts[1][1:2])
+		out[ix, :] = [cos(theta) sin(theta) getValue(t) ustar']
 	end
 	out
 end
 
-#unc_factory(rm) = uncs
-function createSuppFcnPlot(unc_factory::Function; numDirs=200)
-	out = Array(Float64, numDirs, 5)	
-	for ix in 1:numDirs
-		m = RobustModel(solver=GurobiSolver(OutputFlag=0), cutsolver=GurobiSolver(OutputFlag=0))
-		us = unc_factory(m)
-		@defVar(m, t)
-
-		theta = 2pi / numDirs * ix
-		addConstraint(m, cos(theta) * us[1] + sin(theta) * us[2] <= t)
-		@setObjective(m, Min, t)
-		solveRobust(m, active_cuts=true, prefer_cuts=true, report=false)
-
-		#extract the cut itself
-		rd = JuMPeR.getRobust(m)
-		ustar = transpose(rd.activecuts[1][1:2])
-		out[ix, :] = [cos(theta) sin(theta) getValue(t) ustar]
-	end
-	out
+function saveExp(cuts, path)
+	f = open(path, "w")
+	writecsv(f, ["N" "x" "y" "zstar" "u1" "u2"])
+	writecsv(f, cuts)
+	close(f)
 end
 
-function testLCX(numSamples, numDirs)
-    data = randn(500, 2)
-    unc_factoryLCX(model) = LCXSet(model, data, .1, 0.0, numSamples, seed=8675309) 
-    out2 = createSuppFcnPlot(unc_factoryLCX, numDirs=numDirs)
+# data = randn(500, 2)
+# #w = UIOracle(data, [-5., -5.], [5., 5.], .1, .1)
+# w = FBOracle(data, .1, .2)
+# out = createSuppFcnPlot(w, numDirs = 20)
+
 end
-
-data = randn(500, 2)
-#w = UIOracle(data, [-5., -5.], [5., 5.], .1, .1)
-w = FBOracle(data, .1, .2)
-
-out = createSuppFcnPlot(w, numDirs = 20)
-println(out)
-
