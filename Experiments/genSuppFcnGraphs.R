@@ -134,3 +134,23 @@ ggsave("../../Tex Documents/OR_Submission_v2/Figures/UFB_UI_Comp.pdf",
        g, width=.65 * 6.5, height=2.2)
 
 
+##################
+#  UMV, UCS, UDY and ULCX
+###################
+datLCX = read.csv("LCXCuts_100.csv", header=TRUE)
+datLCX$Method = "LCX"
+datLCX = rbind(datLCX, datLCX[1, ])
+
+datUCS = read.csv("CSCuts_Inf.csv", header=TRUE)
+datUCS$Method = "CS"
+datUCS = rbind(datUCS, datUCS[1, ])
+
+dat3 = rbind(datLCX, datUCS)
+rm(datLCX, datUCS)
+dat3$Method = factor(dat3$Method)
+
+ggplot(aes(x=u1, y=u2, group=Method, Method), 
+       data=dat3) + 
+  geom_path() + 
+  theme_bw()
+
