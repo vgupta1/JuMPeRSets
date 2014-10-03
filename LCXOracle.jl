@@ -17,7 +17,7 @@ export suppFcnLCX
 #VG take solver from user
 function ab_cut(us, vs, z, data, eps_, CASE; solver=GurobiSolver(OutputFlag=0))
     m = Model(solver=solver)
-    @defVar(m, a[1:2])
+    @defVar(m, a[1:size(data, 2)])
     @defVar(m, b)
 
     #define the RHS
@@ -28,7 +28,7 @@ function ab_cut(us, vs, z, data, eps_, CASE; solver=GurobiSolver(OutputFlag=0))
     end
 
     #a,b in a box
-    @defVar(m, abs_a[1:2]>=0)
+    @defVar(m, abs_a[1:size(data, 2)]>=0)
     @defVar(m, abs_b >=0)
     @addConstraint(m, abs_b >= b)
     @addConstraint(m, abs_b >= -b)
@@ -36,9 +36,10 @@ function ab_cut(us, vs, z, data, eps_, CASE; solver=GurobiSolver(OutputFlag=0))
         @addConstraint(m, abs_a[i] >=  a[i])
         @addConstraint(m, abs_a[i] >= -a[i])
     end
-   @addConstraint(m, abs_b + abs_a[1] + abs_a[2] <= 1.)
+    #Altered from original paper to match the new sampling technique
+    @addConstraint(m, sum{abs_a[i], i=1:size(data, 2)} <= 1.)
     
-    if CASE == :1
+    if CASE == :1  #VG Do you need the 'vec' calls?
         @addConstraint(m, dot(a, vec(vs)) - (z-1) * b >= 0)
         @addConstraint(m, dot(a, vec(us)) - b >= 0)
         @setObjective(m, :Max, dot(a, vec(vs)) - (z-1)*b + dot(a, vec(us)) - b - sum{t[i], i=1:N})
@@ -94,7 +95,7 @@ function suppFcnLCX(xs, data, eps_, Gamma, cut_sense;
 
     iter::Int64 = 1
     while obj > Gamma + TOL
-        iter > MAXITER && error("LCX Supp: Max Iterations exceeded")
+        iter > MAXITER && error("LCX Supp: Max Iterations exceeded, $(obj - Gamma)")
         iter += 1
 
         @defVar(m, t[1:2] >= 0)
@@ -128,16 +129,13 @@ type LCXOracle <: AbstractOracle
     debug_printcut::Bool
 end
 
-function LCXOracle(data, eps_; cut_tol=1e-6, debug_printcut=false, 
-                    numSamples=int(1e4), numBoots=int(1e4), delta=.2) 
+#Preferred Interface
+function LCXOracle(data, eps_, delta; cut_tol=1e-6, debug_printcut=false, 
+                    numSamples=int(1e4), numBoots=int(1e4)) 
     @assert (0 < eps_ < 1) "Epsilon invalid: $eps_"
     Gamma = calc_ab_thresh(data, delta, numBoots, numSamples)
     LCXOracle(data, eps_, Gamma, cut_tol, debug_printcut)
 end
-
-LCXOracle(data, eps_, Gamma; cut_tol=1e-6, debug_printcut=false) = 
-    ( @assert (0 < eps_ < 1) "Epsilon invalid: $eps_";
-    LCXOracle(data, eps_, Gamma, cut_tol, debug_printcut) )
 
 # JuMPeR alerting us that we're handling this contraint
 registerConstraint(w::LCXOracle, rm::Model, ind::Int, prefs) = 
