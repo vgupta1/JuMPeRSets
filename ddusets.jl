@@ -13,4 +13,4 @@ include("LCXOracle.jl")
 end
 
 #VG kill this when moves to main path
-push!(LOAD_PATH, "/Users/VGupta/Documents/Research/DataDriven Uncertainty SEts/JuMPeRSet/")
+push!(LOAD_PATH, "/Users/VGupta/Documents/Research/DataDriven Uncertainty SEts/JuMPeRSets/")

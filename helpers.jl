@@ -2,7 +2,7 @@
 # Helpers
 ###
 # Contains statistical and other routines used by data-driven sets
-using Distributions, Optim, Roots
+using Distributions, Optim, Roots, JuMP, Gurobi
 
 
 ###Bootstrapping code
@@ -44,23 +44,30 @@ end
 
 #Safer versions of log-sum-exp
 function logMeanExp(x::Float64, data_shift::Vector, b::Float64)
-    x*b + log(mean(exp(x * (data_shift))))
+    x*b + log(mean(exp(x * data_shift)))
 end
 logMeanExp(x::Float64, data::Vector) = (const b = x > 0 ? maximum(data) : minimum(data); logMeanExp(x, data-b, b))
 
 #overwrites hint
 function calcSigSampleHint!(boot_sample::Vector{Float64}, CASE::Symbol, hint::Float64, 
-						min_u::Float64, max_u::Float64; factor = 2.)
+						min_u::Float64, max_u::Float64; factor = 10.)
     const mu = mean(boot_sample)
-
     if CASE == :Fwd
         f(x) = 2mu/x - 2/x^2 * logMeanExp(x, boot_sample-max_u, max_u)  #include a negative bc we minimize
-        res = Optim.optimize(f, hint/factor, factor*hint)
     elseif CASE == :Back
-        f(x) = 2mu/x - 2/x^2 * logMeanExp(x, boot_sample-min_u, min_u)  #include a negative bc we minimize
-        res = Optim.optimize(f, factor*hint, hint/factor)
+        f(x) = -2mu/x - 2/x^2 * logMeanExp(-x, boot_sample-min_u, min_u)  #include a negative bc we minimize
+    else
+        error("CASE must be one of :Fwd or :Back")
     end
+
+    #VG Begin Hack
+#    res = Optim.optimize(f, hint/factor, factor*hint)
+    res = Optim.optimize(f, 1e-7, 10.)
+    #VG END Hack
+
     !res.converged && error("Bootstrapping Opt did not converge")
+    res.f_minimum >=0 && error("Minimum is positive: \t", res.f_minimum)
+
     @assert res.f_minimum < 0
     hint = res.minimum
     return sqrt(-res.f_minimum)
@@ -83,7 +90,7 @@ function calcSigsBoot(data::Vector{Float64}, delta_::Float64, numBoots::Int;
         sigfwd = boot(data, calcSigSampleHint!, 1-delta, numBoots, :Fwd, hint, min_u, max_u)
     end
     if CASE == :Back || CASE == :Both
-        hint = -3e-5*std(data)
+        hint = 3e-5*std(data)
         calcSigSampleHint!(data, :Back, hint, min_u, max_u, factor=3e5*std(data))
         sigback = boot(data, calcSigSampleHint!, 1-delta, numBoots, :Back, hint, min_u, max_u)
     end
@@ -220,15 +227,23 @@ function singlepass!(zetas::Vector, zetahats::Vector)
     Gamma
 end
 
-#a::Vector is used as storage between bootstraps
-function f2(boot_sample::Matrix, data::Matrix, numSamples::Int, a::Vector)
+#a::Vector, sgns::Vector is used as storage between bootstraps
+## VG Fix this... separation routine assumes (a,b) in L1.  This uses a in L1
+function f2(boot_sample::Matrix, data::Matrix, numSamples::Int, a::Vector, sgns::Vector)
     Gamma::Float64 = 0.
     for i = 1:numSamples
-        randn!(a)
-        a /= norm(a)
-        Gamma = max(Gamma, singlepass!(data*a, boot_sample*a))
+        randL1!(a, sgns)
+        Gamma_ = singlepass!(data*a, boot_sample*a)
+        Gamma = max(Gamma, Gamma_)
     end
     Gamma
+end
+
+function randL1!(a, sgns)
+    a = rand!(a) 
+    a = a/ sum(a)
+    rand!(Bernoulli(), sgns)
+    a = a .* (2*sgns-1)
 end
 
 #Approximates the threshold by sampling a bunch of abs for each bootstrap rep
@@ -236,9 +251,56 @@ function calc_ab_thresh(data::Matrix, delta::Float64, numBoots::Int, numSamples:
     const N = size(data, 1)
     const d = size(data, 2)
     a::Vector{Float64} = zeros(Float64, d)
-    boot(data, f2, 1-delta, numBoots, data, numSamples, a)
+    sgns::Vector{Int}  = zeros(Int64, d)
+    boot(data, f2, 1-delta, numBoots, data, numSamples, a, sgns)
 end
 
+function compute_cs(boot_indx)
+    cs = ones(length(boot_indx))
+    for i = boot_indx
+        cs[i] = cs[i] - 1
+    end
+    return cs/length(boot_indx)
+end
+
+#solves a MIP to calcualte Gamma
+#Used only for debugging purposes
+function mip_ab(dat, boot_indx)
+    const d = size(dat, 2)
+    m = Model(solver=GurobiSolver())
+    @defVar(m, -1 <= as[1:d] <=1 )
+    @defVar(m, -1 <= b <= 1)
+    @defVar(m, abs_as[1:d] >= 0 )
+    @defVar(m, abs_b >= 0)
+    for i = 1:d
+        @addConstraint(m, abs_as[i] >= as[i])
+        @addConstraint(m, abs_as[i] >= -as[i])
+    end
+    @addConstraint(m, abs_b >= b)
+    @addConstraint(m, abs_b >= -b)
+    @addConstraint(m, sum{abs_as[i], i=1:d} + abs_b <= 1)
+    
+    cs = compute_cs(boot_indx)
+    @defVar(m, t[1:size(dat, 1)] >= 0)
+    for (ix, c) in enumerate(cs)
+        if c == 0
+            continue
+        elseif c <= 0
+            @addConstraint(m, t[ix] >= dot(dat[ix, :], as[:]) - b )
+        else
+            @defVar(m, z, Bin)
+            M = maximum(abs(dat[ix, :])) + 1
+            expr = dot(dat[ix, :], as[:]) - b
+            @addConstraint(m, expr >= M*z-M)
+            @addConstraint(m, t[ix] <= expr + M- M*z)
+            @addConstraint(m, expr <= M*z )
+            @addConstraint(m, t[ix] <= M*z)
+        end
+    end
+    @setObjective(m, Max, dot(cs, t))
+    solve(m)
+    return(getObjectiveValue(m), (getValue(as), getValue(b)))
+end
 
 
 

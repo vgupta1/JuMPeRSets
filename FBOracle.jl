@@ -16,28 +16,24 @@ function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
         xs = copy(-xs)
         sign_flip = -1
     end
-    y1 = zeros(Float64, length(xs))
-    y2 = zeros(Float64, length(xs))
-    y3 = zeros(Float64, length(xs))
     lam = 0
     for i = 1:length(xs)
         if xs[i] >= 0
-            y1[i] = xs[i] * mfs[i]
-            y2[i] = xs[i] * sigfs[i]^2
-            y3[i] = 0.
             lam += sigfs[i]^2 * xs[i]^2
         else
-            y1[i] = xs[i] * mbs[i]
-            y2[i] = 0.
-            y3[i] = -xs[i] * sigbs[i]^2
             lam += sigbs[i]^2 * xs[i]^2
         end
     end
     lam /= (2 * log_eps)
     lam = sqrt(lam)
-    y2 /= lam
-    y3 /= lam
-    ustar = y1 + y2 - y3
+    ustar = zeros(length(xs))
+    for i = 1:length(xs)
+        if xs[i] >= 0
+            ustar[i] = mfs[i] + xs[i] * sigfs[i]^2/lam
+        else
+            ustar[i] = mbs[i] + xs[i] * sigbs[i]^2/lam
+        end
+    end
     zstar = dot(xs, ustar) * sign_flip
     return zstar, ustar
 end
@@ -70,7 +66,7 @@ function FBOracle(data, eps, delta1, delta2; CUT_TOL=1e-6, numBoots=int(1e4))
     sigbs = zeros(Float64, d)
 
     for i = 1:d
-        mfs[i], mbs[i] = calcMeansT(data[:, i], delta1/d)
+        mbs[i], mfs[i] = calcMeansT(data[:, i], delta1/d)
         sigfs[i], sigbs[i] = calcSigsBoot(data[:, i], delta2/d, numBoots)
     end
     FBOracle(mfs, mbs, sigfs, sigbs, eps, TOL=CUT_TOL)
