@@ -11,32 +11,32 @@ function suppFcnTest()
 	srand(8675309)
 	data = randn(100, 2)
 	zstar, ustar = suppFcnLCX([1, 1], data, .1, .35, :Min)
-	@test_approx_eq(zstar, -3.76360390834329)
-	@test_approx_eq(ustar[1], -1.668344114657504)
-	@test_approx_eq(ustar[2], -2.0952597936857864)
+	@test_approx_eq(zstar, -3.1455496412236243)
+	@test_approx_eq(ustar[1], -1.313810356077738)
+	@test_approx_eq(ustar[2], -1.8317392851458862)
 
 	zstar, ustar = suppFcnLCX([1, 1], data, .1, .35, :Max)
-	@test_approx_eq(zstar, 4.174542588282224)
-	@test_approx_eq(ustar[1], 2.034698238036357)
-	@test_approx_eq(ustar[2], 2.139844350245866)
+	@test_approx_eq(zstar, 3.447833040263504)
+	@test_approx_eq(ustar[1], 1.5387299947906286)
+	@test_approx_eq(ustar[2], 1.9091030454728752)
 
 	zstar, ustar = suppFcnLCX([-1, 1], data, .1, .35, :Min)
-	@test_approx_eq(zstar, -3.3382572598056868)
-	@test_approx_eq(ustar[1], 1.5699603104731068)
-	@test_approx_eq(ustar[2], -1.76829694933258)
+	@test_approx_eq(zstar, -2.8182398717617616)
+	@test_approx_eq(ustar[1], 1.3068007701076567)
+	@test_approx_eq(ustar[2], -1.5114391016541049)
 
 	zstar, ustar = suppFcnLCX([-1, 1], data, .1, .35, :Max)
-	@test_approx_eq(zstar, 3.7547438615152613)
-	@test_approx_eq(ustar[1], -1.9828608456376906)
-	@test_approx_eq(ustar[2], 1.7718830158775705)
+	@test_approx_eq(zstar, 3.157077158917673)
+	@test_approx_eq(ustar[1], -1.7212256391067058)
+	@test_approx_eq(ustar[2], 1.4358515198109671)
 end
 
 
 function portTest()
 	srand(8675309)
 	data = randn(500, 2)
-	w = LCXOracle(data, .1, .2)
-	portTest(w, -1.623657518865325, [0.5374070897836245, 0.4625929102163755])
+	w = LCXOracle(data, .1, .2, 1e-6, false)
+	portTest(w, -1.4293015271256384, [0.5424436347803758, 0.4575563652196242])
 end
 
 Test.with_handler(Test.default_handler) do

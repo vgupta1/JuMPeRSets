@@ -39,8 +39,8 @@ end
 function fwdBackSigsTest()
 	srand(8675309); data = randn(100)
 	sigfwd, sigback = calcSigsBoot(data, .1, 10000)
-	@test_approx_eq_eps(sigfwd, 1.0833801175057305, 1e-10)
-	@test_approx_eq_eps(sigback, 1.0836955585310808, 1e-10)
+	@test_approx_eq_eps(sigfwd, 1.0918195335954186, 1e-10)
+	@test_approx_eq_eps(sigback, 1.08588753435207, 1e-10)
 end
 
 function KSGammaTest()
@@ -62,7 +62,7 @@ end
 function ab_thresh_test()
 	srand(8675309); data = randn(100, 3)
 	gamma = calc_ab_thresh(data, .2, 100, 100)	
-	@test_approx_eq(gamma, 0.20898705812285034)
+	@test_approx_eq(gamma, 0.1777841615666656)
 end
 
 
