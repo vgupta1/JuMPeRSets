@@ -120,6 +120,8 @@ function KSGamma(delta, N)
        num/denom
 end
 
+kappa(eps_) = sqrt(1./eps_ - 1.)
+
 function boot_mu(data, delta, numBoots)
     const muhat = mean(data, 1)
     myfun(data_b) = norm(mean(data_b, 1) - muhat)
@@ -148,30 +150,44 @@ function bootDY_sigma(data, delta, numBoots)
         mudiff = (mu0 - muhat)'*(mu0-muhat)
         f(g2) = eigmin(g2*sighat - sig0 -mudiff)
 
+        #If the dist of sighat is degenerate, return Inf
+        if eigmin(sighat) <= 0 
+            println("Infinite 2nd moment matrix")
+            return Inf
+        end
+
         #solve
         try       
             fzero(f, [.01, 500])
         catch e
             show(e); println()
-            println("Using Manual Bracketing")
+            println("Using Manual Bracketing: f(1) $(f(1))  f(2) $(f(2))")
             #do your own bracketing
             if f(1) < 0
                 lb = 1; ub = 2
-                while f(ub) < 0
+                iter = 0
+                const MAX_ITER = 100
+                while f(ub) < 0 && iter < MAX_ITER
+                    println("$iter \t $(f(ub))")
                     lb = ub
                     ub = ub * 2
+                    iter = iter + 1
                 end
             else
                 lb = .5; ub = 1
-                while f(lb) > 0
+                iter = 0
+                const MAX_ITER = 100
+                while f(lb) > 0 && iter < MAX_ITER
                     ub = lb
                     lb = lb * .5
+                    iter = iter + 1
                 end
             end
             try
                 fzero(f, [lb, ub])
             catch e2
                 println("Manual bracketing failed")
+                println("Debug Sequence")
                 for i = 10.0.^[-2:5]
                     println(f(i))
                 end
@@ -181,6 +197,17 @@ function bootDY_sigma(data, delta, numBoots)
    end
    boot(data, myfun, 1-delta, numBoots)
 end
+
+### Used by UM and UIOracle
+function sort_data_cols(data)
+    data_sort = zeros(eltype(data), size(data))
+    const d = size(data, 2)
+    for i = 1:d
+        data_sort[:, i] = sort(data[:, i])
+    end
+    data_sort
+end
+
 
 ########
 # LCX Stuff
@@ -301,6 +328,3 @@ function mip_ab(dat, boot_indx)
     solve(m)
     return(getObjectiveValue(m), (getValue(as), getValue(b)))
 end
-
-
-

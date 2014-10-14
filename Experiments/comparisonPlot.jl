@@ -8,7 +8,8 @@ using DDUSets
 module SP
 using Gurobi, Distributions, JuMPeR
 
-function simData(N)
+function simData(N, seed = 8675309)
+	srand(seed)
 	d1 = Beta(4, 4); d2 = Beta(.4, 2)
 	[2 * rand(d1, N)-1  2*rand(d2, N)-1]
 end
@@ -20,7 +21,7 @@ function createSuppFcnPlot(oracle::AbstractOracle; numDirs=200, bounds=nothing)
 		@defVar(m, t)
 		if bounds !=nothing
 			lbnds, ubnds = zip(bounds...)
-			@defUnc(m, lbbnds[i] <= us[i=1:2] <= ubnds[i])
+			@defUnc(m, lbnds[i] <= us[i=1:2] <= ubnds[i])
 		else
 			@defUnc(m, us[i=1:2])
 		end
@@ -29,13 +30,17 @@ function createSuppFcnPlot(oracle::AbstractOracle; numDirs=200, bounds=nothing)
 		theta = 2pi / numDirs * ix
 		cr = addConstraint(m, cos(theta) * us[1] + sin(theta) * us[2] <= t)
 		@setObjective(m, Min, t)
-		solveRobust(m, active_cuts=true, prefer_cuts=true, report=false)
+		try
+			solveRobust(m, active_cuts=true, prefer_cuts=true, report=false)
 
-		#extract the cut itself
-		rd = JuMPeR.getRobust(m)
-		ustar = getScenario(cr).data
-		#ustar = transpose(rd.activecuts[1][1:2])
-		out[ix, :] = [cos(theta) sin(theta) getValue(t) ustar']
+			#extract the cut itself
+			rd = JuMPeR.getRobust(m)
+			ustar = getScenario(cr).data
+			out[ix, :] = [cos(theta) sin(theta) getValue(t) ustar']
+			println(ix, "\t", out[ix, :])
+		catch
+			#do nothing
+		end
 	end
 	out
 end
@@ -48,8 +53,13 @@ function saveExp(cuts, path)
 end
 
 #For the LCX plot
-# 100 sample points, Gamma = .060  (beta densities)
-# 1000 sample points, GAmma = .017
-
+# 100 data points, Gamma = .060  (beta densities)
+# 1000 data points, GAmma = .017
+# 10000 data points, Gamma = 0.005380338502093185... num Boots only 1000
 
 end
+
+dat = SP.simData(10000)
+# wLCX = LCXOracle(dat, .1, .2, numBoots=1000)
+# wUDY = UDYOracle(dat, .1, .2)
+# wUCS = UCSOracle(dat, .1, .2)

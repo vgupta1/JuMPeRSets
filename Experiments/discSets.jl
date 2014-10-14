@@ -115,33 +115,32 @@ function createConvPlot()
 end
 
 function dumpSuppFcnFiles()
-N_grid = [100, 500, 1000, 5000, 10000]
+	N_grid = [100, 500, 1000, 5000, 10000]
 
-f = open("ChiSq.csv", "w")
-writecsv(f, ["N" "x1" "x2" "zstar" "u1" "u2"])
+	f = open("ChiSq.csv", "w")
+	writecsv(f, ["N" "x1" "x2" "zstar" "u1" "u2"])
 
-for N in N_grid
-	out = DS.createSuppFcnPlot(DS.suppChiSq, N)
-	out = hcat(N * ones(size(out, 1)), out)
-	writecsv(f, out)
-end
-close(f)
+	for N in N_grid
+		out = DS.createSuppFcnPlot(DS.suppChiSq, N)
+		out = hcat(N * ones(size(out, 1)), out)
+		writecsv(f, out)
+	end
+	close(f)
 
-f = open("G.csv", "w")
-writecsv(f, ["N" "x1" "x2" "zstar" "u1" "u2"])
-for N in N_grid
-	out = DS.createSuppFcnPlot(DS.suppG, N)
-	out = hcat(N * ones(size(out, 1)), out)
-	writecsv(f, out)
-end
-close(f)
+	f = open("G.csv", "w")
+	writecsv(f, ["N" "x1" "x2" "zstar" "u1" "u2"])
+	for N in N_grid
+		out = DS.createSuppFcnPlot(DS.suppG, N)
+		out = hcat(N * ones(size(out, 1)), out)
+		writecsv(f, out)
+	end
+	close(f)
 
-#The exact run.
-f = open("Exact.csv", "w")
-writecsv(f, ["N" "x1" "x2" "zstar" "u1" "u2"])
-out = DS.createSuppFcnPlot(DS.suppExact, int(1e8))
-writecsv(f, hcat(1e8 * ones(size(out, 1)), out))
-
+	#The exact run.
+	f = open("Exact.csv", "w")
+	writecsv(f, ["N" "x1" "x2" "zstar" "u1" "u2"])
+	out = DS.createSuppFcnPlot(DS.suppExact, int(1e8))
+	writecsv(f, hcat(1e8 * ones(size(out, 1)), out))
 end
 
 

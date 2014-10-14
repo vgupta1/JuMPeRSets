@@ -97,15 +97,8 @@ datUIInf$u2[150] = -1
 dat = rbind(datFB, datUI, datFBInf, datUIInf)
 dat$ID = paste(dat$Method, dat$N, sep="_")
 
-##VG To do:  
-#Repair the top portio of the graph and bottom portions to get linkage
-#trip the top of the plot to get more bang for buck...
-#Figure out a better color/labeling scheme..
-#Add a dotted lien for the unit square
-#use heavier lines to distinguish between two sets
-
 g<- ggplot(aes(x=u1, y=u2), 
-           data=subset(dat, u2>=-1)) + 
+           data=dat) + 
   geom_path(aes(group=ID, size=Method, color=factor(N), linetype=Method)) + 
   theme_bw(base_size=10) + 
   theme(text=element_text(family=font), 
@@ -117,8 +110,8 @@ g<- ggplot(aes(x=u1, y=u2),
                        labels=c(expression(U^{FB}), expression(U^I))) +
   scale_size_manual(values=c(.8, 1.5), guide=FALSE) + 
   scale_color_manual(breaks=c("100", "1e+06"), 
-                     values=c("black", "blue"), 
-                     labels=c("100", expression(infinity)))
+                     values=c("black", "grey"), 
+                     labels=c("N=100", "N=Inf"))
 
 #Add a bounding box
 box  = data.frame(matrix(c(1,          1,  
@@ -130,8 +123,8 @@ g<- g + geom_path(aes(x=X1, y=X2), data=box, linetype="dotted", color="black")
 g<- g + xlim(-1, 1.4) + theme(legend.position=c(.9, .5))
 
 
-ggsave("../../Tex Documents/OR_Submission_v2/Figures/UFB_UI_Comp.pdf", 
-       g, width=.65 * 6.5, height=2.2)
+ggsave("../../Tex Documents/OR_Submission_v2/Figures/UFB_UI_Comp1.pdf", 
+       g, width=.7 * 6.5, height=2.2)
 
 
 ##################
@@ -141,16 +134,122 @@ datLCX = read.csv("LCXCuts_100.csv", header=TRUE)
 datLCX$Method = "LCX"
 datLCX = rbind(datLCX, datLCX[1, ])
 
-datUCS = read.csv("CSCuts_Inf.csv", header=TRUE)
-datUCS$Method = "CS"
-datUCS = rbind(datUCS, datUCS[1, ])
+# datUCS = read.csv("CSCuts_100.csv", header=TRUE)
+# datUCS$Method = "CS"
+# datUCS = rbind(datUCS, datUCS[1, ])
 
-dat3 = rbind(datLCX, datUCS)
-rm(datLCX, datUCS)
+datUCSRd = read.csv("CSCutsRd_100.csv", header=TRUE)
+datUCSRd$Method = "CS"
+datUCSRd = rbind(datUCSRd, datUCSRd[1, ])
+
+datUDY = read.csv("DYCuts_100.csv", header=TRUE)
+datUDY$Method = "DY"
+datUDY = rbind(datUDY, datUDY[1, ])
+
+datUM = read.csv("UMCuts_100.csv", header=TRUE)
+datUM$Method = "M"
+datUM = rbind(datUM, datUM[1, ])
+
+dat3 = rbind(datLCX, datUDY, datUM, datUCSRd)
+#rm(datLCX, datUCS, datUDY, datUM)
 dat3$Method = factor(dat3$Method)
 
-ggplot(aes(x=u1, y=u2, group=Method, Method), 
+g<- ggplot(aes(x=u1, y=u2), 
        data=dat3) + 
-  geom_path() + 
-  theme_bw()
+  geom_path(aes(color=Method, group=Method, linetype=Method), size=1) + 
+  theme_bw(base_size=10) + 
+  theme(legend.title=element_blank(), 
+        text=element_text(family=font),
+        legend.position=c(.5, .9), 
+        legend.direction="horizontal") + 
+  xlab(expression(u[1])) + ylab(expression(u[2]))  + 
+  scale_linetype_manual(breaks=c("CS", "DY", "LCX", "M"), 
+                            values=c("dotted", "dashed", "twodash", "solid"))
+  
+g<- g + geom_path(aes(x=X1, y=X2), data=box, linetype="dotted", color="black") +
+        ylim(-2.2, 1.7)
+
+ggsave("../../Tex Documents/OR_Submission_v2/Figures/compPlot_100.pdf", g, height = 2.5, width=.5 * 6.5)
+
+
+
+
+
+datLCX = read.csv("LCXCuts_1000.csv", header=TRUE)
+datLCX$Method = "LCX"
+datLCX = rbind(datLCX, datLCX[1, ])
+
+datUCSRd = read.csv("CSCutsRd_1000.csv", header=TRUE)
+datUCSRd$Method = "CS"
+datUCSRd = rbind(datUCSRd, datUCSRd[1, ])
+
+datUDY = read.csv("DYCuts_1000.csv", header=TRUE)
+datUDY$Method = "DY"
+datUDY = rbind(datUDY, datUDY[1, ])
+
+datUM = read.csv("UMCuts_1000.csv", header=TRUE)
+datUM$Method = "M"
+datUM = rbind(datUM, datUM[1, ])
+
+dat3 = rbind(datLCX, datUCSRd, datUDY, datUM)
+#rm(datLCX, datUCS, datUDY, datUM)
+dat3$Method = factor(dat3$Method)
+
+g2<- ggplot(aes(x=u1, y=u2), 
+           data=dat3) + 
+  geom_path(aes(color=Method, group=Method, linetype=Method), size=1) + 
+  theme_bw(base_size=10) + 
+  theme(legend.title=element_blank(), 
+        text=element_text(family=font),
+        legend.position=c(.5, .9), 
+        legend.direction="horizontal") + 
+  xlab(expression(u[1])) + ylab(expression(u[2]))  +  
+  scale_linetype_manual(breaks=c("CS", "DY", "LCX", "M"), 
+                        values=c("dotted", "dashed", "twodash", "solid"))
+
+g2<- g2 + geom_path(aes(x=X1, y=X2), data=box, linetype="dotted", color="black") +
+  ylim(-2.2, 1.7)
+
+ggsave("../../Tex Documents/OR_Submission_v2/Figures/compPlot_1000.pdf", g2, height = 2.5, width=.5 * 6.5)
+
+
+###
+datLCX = read.csv("LCXCuts_1000.csv", header=TRUE)
+datLCX$Method = "LCX"
+datLCX = rbind(datLCX, datLCX[1, ])
+
+datUCSRd = read.csv("CSCuts_Inf.csv", header=TRUE)
+datUCSRd$Method = "CS"
+datUCSRd = rbind(datUCSRd, datUCSRd[1, ])
+
+datUDY = read.csv("DYCuts_Inf.csv", header=TRUE)
+datUDY$Method = "DY"
+datUDY = rbind(datUDY, datUDY[1, ])
+
+datUM = read.csv("UMCuts_Inf.csv", header=TRUE)
+datUM$Method = "M"
+datUM = rbind(datUM, datUM[1, ])
+
+dat3 = rbind(datLCX, datUDY, datUM, datUCSRd)
+#rm(datLCX, datUCS, datUDY, datUM)
+dat3$Method = factor(dat3$Method)
+
+g3<- ggplot(aes(x=u1, y=u2), 
+            data=dat3) + 
+  geom_path(aes(color=Method, group=Method, linetype=Method), size=1) + 
+  theme_bw(base_size=10) + 
+  theme(legend.title=element_blank(), 
+        text=element_text(family=font),
+        legend.position=c(.5, .9), 
+        legend.direction="horizontal") + 
+  xlab(expression(u[1])) + ylab(expression(u[2]))  +  
+  scale_linetype_manual(breaks=c("CS", "DY", "LCX", "M"), 
+                        values=c("dotted", "dashed", "twodash", "solid"))
+
+
+## Pull out some useful values
+subset(dat3, abs(x) <= 1e-8 )
+
+
+
 

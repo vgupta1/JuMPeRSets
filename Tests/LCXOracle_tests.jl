@@ -35,7 +35,7 @@ end
 function portTest()
 	srand(8675309)
 	data = randn(500, 2)
-	w = LCXOracle(data, .1, .2, 1e-6, false)
+	w = LCXOracle(data, .1, .2, Gamma=.2)
 	portTest(w, -1.4293015271256384, [0.5424436347803758, 0.4575563652196242])
 end
 

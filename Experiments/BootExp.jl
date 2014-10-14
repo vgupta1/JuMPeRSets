@@ -10,7 +10,7 @@ include("../helpers.jl")
 Gamma1CS(R, N, alpha) = R/sqrt(N) * (2 + sqrt(2 *log(1/alpha)))
 Gamma2CS(R, N, alpha) = 2R^2/sqrt(N) * (2 + sqrt(2 *log(2/alpha)))
 
-function DYGammas(R, N, alpha)
+function DYGammas(R, N, alpha, d=2)
 	Beta2 = R^2/N * (2 + sqrt(2 * log(2/alpha)))^2
 	Beta1 = R^2/sqrt(N) * (sqrt(1-d/R^4) + sqrt(log(4/alpha))) 
 	if 1 - Beta1 - Beta2 < 0
@@ -21,11 +21,11 @@ function DYGammas(R, N, alpha)
 	(gamma1, gamma2)
 end
 
-const alpha = .1
-const d = 2
-const R = 9.2
+function genComparisonTable(N_grid; numBoots=int(1e4))
+	const alpha = .1
+	const d = 2
+	const R = 9.2
 
-function CSGammaExp(N_grid; numBoots=int(1e4))
 	out = zeros(length(N_grid), 9)
 	for (ix, N) in enumerate(N_grid)
 		out[ix, 1] = N

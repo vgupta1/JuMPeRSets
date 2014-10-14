@@ -23,15 +23,6 @@ function gen_ql_qr(N::Int, Gamma)
     return qL, qL[N+2:-1:1]
 end
 
-function sort_data_cols(data)
-    data_sort = zeros(eltype(data), size(data))
-    const d = size(data, 2)
-    for i = 1:d
-        data_sort[:, i] = sort(data[:, i])
-    end
-    data_sort
-end
-
 #preferred interface
 function suppFcnUI(xs, data, lbounds, ubounds, log_eps, Gamma; cut_sense=:Max, lam_min=1e-8, lam_max=1e2, xtol=1e-8)
     data_sort = sort_data_cols(data)

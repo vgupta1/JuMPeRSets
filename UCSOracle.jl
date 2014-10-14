@@ -52,8 +52,6 @@ end
 #preferred interface
 UCSOracle(data, eps_, delta; numBoots=10000) = UCSOracle(data, eps_, delta/2, delta/2, numBoots=numBoots)
 
-kappa(eps_) = sqrt(1./eps_ - 1.)
-
 #the supp fcn when support = Rd
 function suppFcnUCSRd(xs, muhat, Gamma1, Gamma2, covbar, eps_k, cut_sense=:Max)
     toggle = 1.
