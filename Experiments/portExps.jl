@@ -7,6 +7,7 @@ using DDUSets, JuMPeR, MLBase
 import Distributions
 
 #For N = 500, GammaLCX = 0.2775971931202961
+#For N = 2000, GammaLCX = 0.1186264147718835
 function simMktChen(N; seed=8675309)
 	seed != nothing && srand(seed)
 	Bs = [.5 * (1 + i/11) for i = 1:10] 
@@ -243,9 +244,9 @@ function allPorts(N, GammaLCX; seed=8675309)
 	const delta = .1
 	R, lbs, ubs = simMktChen(N, seed=seed)
 	out = hcat(["Method" "zIn"], ["x$i" for i =1:d]')
-	# #CS
-	# zstar, xvals = portTest(UCSOracle(R, eps_, delta, lbs, ubs)
-	# out = [out; "CS" zstar xvals']
+	#CS
+	zstar, xvals = portTest(UCSOracle(R, eps_, delta, lbs, ubs)
+	out = [out; "CS" zstar xvals']
 
 	#CSNP
 	zstar, xvals = portTest(UCSOracle(R, eps_, delta), fill(-1000, d), fill(1000, d))
@@ -255,9 +256,9 @@ function allPorts(N, GammaLCX; seed=8675309)
 	zstar, xvals = portTest(UMOracle(R, lbs, ubs, eps_, delta), lbs, ubs)
 	out = [out; "M" zstar xvals[:]']
 
-	# #DY
-	# zstar, xvals = portTest(UDYOracle(R, eps_, delta), lbs, ubs)
-	# out = [out; "DY" zstar xvals[:]']
+	#DY
+	zstar, xvals = portTest(UDYOracle(R, eps_, delta), lbs, ubs)
+	out = [out; "DY" zstar xvals[:]']
 
 	#CC
 	q, viol = calcq_loose(N, delta, d, eps_)
