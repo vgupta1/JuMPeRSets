@@ -2,8 +2,10 @@
 # Helpers
 ###
 # Contains statistical and other routines used by data-driven sets
-using Distributions, Optim, Roots, JuMP, Gurobi
+using Distributions, Optim, Roots, JuMP, Gurobi #VG Can these be moved above?
 
+export boot, calcMeansT, calcSigsBoot
+export boot_mu, boot_sigma, bootDY_mu, bootDY_sigma, calc_ab_thresh
 
 ###Bootstrapping code
 # ideally this should all be moved to some base level function

@@ -5,16 +5,12 @@
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
 import JuMP.UnsetSolver
 
-using Gurobi  #VG drop this dependency
-
 export UCSOracle
 export suppFcnUCSRd
 
 #To Do
-# Check bounds and use closed-form support function
 # Incorporate side-constraints
 # Implement reformulation
-# Write tests
 
 type UCSOracle <: AbstractOracle
     eps_kappa::Float64

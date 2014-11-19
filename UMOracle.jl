@@ -6,8 +6,6 @@
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
 import JuMP.UnsetSolver
 
-using Gurobi  #VG drop this dependency
-
 export UMOracle
 export suppFcnUM
 
