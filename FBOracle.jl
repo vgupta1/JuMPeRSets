@@ -3,42 +3,9 @@
 ###
 # At the moment only supports cutting planes
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
-import JuMP.UnsetSolver
 
 export FBOracle
-export suppFcnFB
-
-#log_eps = log(1/eps_)
-#returns zstar, ustar
-function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
-    sign_flip = 1
-    if cut_sense == :Min
-        xs = copy(-xs)
-        sign_flip = -1
-    end
-    lam = 0
-    for i = 1:length(xs)
-        if xs[i] >= 0
-            lam += sigfs[i]^2 * xs[i]^2
-        else
-            lam += sigbs[i]^2 * xs[i]^2
-        end
-    end
-    lam /= (2 * log_eps)
-    lam = sqrt(lam)
-    ustar = zeros(length(xs))
-    for i = 1:length(xs)
-        if xs[i] >= 0
-            ustar[i] = mfs[i] + xs[i] * sigfs[i]^2/lam
-        else
-            ustar[i] = mbs[i] + xs[i] * sigbs[i]^2/lam
-        end
-    end
-    zstar = dot(xs, ustar) * sign_flip
-    return zstar, ustar
-end
-suppFcnFB(xs, w, cut_sense) = 
-    suppFcnFB(xs, w.mfs, w.mbs, w.sigfs, w.sigbs, w.log_eps, cut_sense)
+export suppFcn
 
 type FBOracle <: AbstractOracle
     mfs::Vector{Float64}
@@ -74,6 +41,40 @@ end
 FBOracle(data, eps, delta; CUT_TOL=1e-6, numBoots=int(1e4)) = 
     FBOracle(data, eps, delta/2, delta/2, CUT_TOL=CUT_TOL, numBoots=numBoots)
 
+suppFcn(xs, w::FBOracle, cut_sense) = 
+    suppFcnFB(xs, w.mfs, w.mbs, w.sigfs, w.sigbs, w.log_eps, cut_sense)
+
+#log_eps = log(1/eps_)
+#returns zstar, ustar
+function suppFcnFB(xs, mfs, mbs, sigfs, sigbs, log_eps, cut_sense=:Max)
+    sign_flip = 1
+    if cut_sense == :Min
+        xs = copy(-xs)
+        sign_flip = -1
+    end
+    lam = 0
+    for i = 1:length(xs)
+        if xs[i] >= 0
+            lam += sigfs[i]^2 * xs[i]^2
+        else
+            lam += sigbs[i]^2 * xs[i]^2
+        end
+    end
+    lam /= (2 * log_eps)
+    lam = sqrt(lam)
+    ustar = zeros(length(xs))
+    for i = 1:length(xs)
+        if xs[i] >= 0
+            ustar[i] = mfs[i] + xs[i] * sigfs[i]^2/lam
+        else
+            ustar[i] = mbs[i] + xs[i] * sigbs[i]^2/lam
+        end
+    end
+    zstar = dot(xs, ustar) * sign_flip
+    return zstar, ustar
+end
+
+
 
 # JuMPeR alerting us that we're handling this contraint
 registerConstraint(w::FBOracle, rm::Model, ind::Int, prefs) = 
@@ -98,10 +99,9 @@ function generateCut(w::FBOracle, m::Model, rm::Model, inds::Vector{Int}, active
 
     for ind in inds
         # Update the cutting plane problem's objective
-        # VG should move to sparse build_cut
         con = JuMPeR.get_uncertain_constraint(rm, ind)
         cut_sense, xs, lhs_const = JuMPeR.build_cut_objective(rm, con, m.colVal)
-        zstar, ustar = suppFcnFB(xs, w, cut_sense) 
+        zstar, ustar = suppFcn(xs, w, cut_sense) 
         lhs_of_cut = zstar + lhs_const
 
         # SUBJECT TO CHANGE: active cut detection

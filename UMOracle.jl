@@ -1,16 +1,11 @@
 #####
 # UM
 #####
-
-# At the moment only supports cutting planes
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
 import JuMP.UnsetSolver
 
 export UMOracle
-export suppFcnUM
-
-
-##VG To Do:  Rationalize the support function calls to be overloaded methods
+export suppFcn
 
 #returns zstar, ustar
 function suppFcnUM(xs, lquants, uquants, cut_sense=:Max)
@@ -35,7 +30,6 @@ function calc_s(data, eps_, delta)
 end
 
 ######################
-
 type UMOracle <: AbstractOracle
     lquants::Vector{Float64}
     uquants::Vector{Float64}
@@ -44,6 +38,9 @@ type UMOracle <: AbstractOracle
     # Other options
     debug_printcut::Bool
 end
+
+suppFcn(xs::Vector, w::UMOracle, cut_sense) = 
+        suppFcnUM(xs, w.lquants, w.uquants, cut_sense)
 
 #Preferred Interface
 function UMOracle(data, lbounds, ubounds, eps_, delta; cut_tol=1e-6, debug_printcut=false)
@@ -107,8 +104,6 @@ end
 #Shouldn't be called
 generateReform(w::UMOracle, m::Model, rm::Model, inds::Vector{Int}) = 0
 
-suppFcn(xs::Vector, w::UMOracle, cut_sense::Symbol=:Max) = 
-		suppFcnUM(xs, w.lquants, w.uquants, cut_sense)
 
 
 

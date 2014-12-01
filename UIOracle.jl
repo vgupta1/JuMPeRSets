@@ -4,15 +4,37 @@
 # Only supports cutting planes
 using Optim
 import JuMPeR: registerConstraint, setup, generateCut, generateReform
-import JuMP.UnsetSolver
 
-export suppFcnUI
 export UIOracle
+export suppFcn
+
+type UIOracle <: AbstractOracle
+    lbounds::Vector{Float64}
+    ubounds::Vector{Float64}
+    data_sort::Matrix{Float64}
+    log_eps::Float64
+
+    # Cutting plane algorithm
+    qL::Vector{Float64}
+    qR::Vector{Float64}
+    cut_tol::Float64  ##defaults to 1e-6
+
+    # Other options
+    debug_printcut::Bool
+end
+
+#preferred constructor
+function UIOracle(data, lbounds, ubounds, eps, delta; cut_tol = 1e-6) 
+    N, d = size(data)
+    data_sort = sort_data_cols(data)
+    Gamma = KSGamma(delta, N)
+    qL, qR = gen_ql_qr(N, Gamma)
+    UIOracle(vec(lbounds), vec(ubounds), data_sort, log(1/eps), qL, qR, 1e-6, false)
+end
 
 #returns bool, and ustar for degen case
-#data is assumed to have two extra rows representing bounds
 is_degen(d, Gamma, log_eps) = d * log(1/Gamma) <= log_eps
-degen_case(xs, lbounds, ubounds) = [xs[i] >= 0 ? ubounds[i] : lbounds[i]]::Vector{Float64}
+degen_case(xs, lbounds::Vector{Float64}, ubounds::Vector{Float64}) = [xs[i] >= 0 ? ubounds[i] : lbounds[i] for i =1:length(xs)]
 
 function gen_ql_qr(N::Int, Gamma)
     qL = zeros(Float64, N+2)
@@ -23,7 +45,6 @@ function gen_ql_qr(N::Int, Gamma)
     return qL, qL[N+2:-1:1]
 end
 
-#preferred interface
 function suppFcnUI(xs, data, lbounds, ubounds, log_eps, Gamma; cut_sense=:Max, lam_min=1e-8, lam_max=1e2, xtol=1e-8)
     data_sort = sort_data_cols(data)
     qL, qR = gen_ql_qr(size(data_sort, 1), Gamma)
@@ -85,29 +106,8 @@ function suppFcnUI(xs, data_sort, lbounds, ubounds, log_eps, qL, qR, cut_sense, 
     toggle*dot(ustar, xs), ustar
 end
 
-type UIOracle <: AbstractOracle
-    lbounds::Vector{Float64}
-    ubounds::Vector{Float64}
-    data_sort::Matrix{Float64}
-    log_eps::Float64
-
-    # Cutting plane algorithm
-    qL::Vector{Float64}
-    qR::Vector{Float64}
-    cut_tol::Float64  ##defaults to 1e-6
-
-    # Other options
-    debug_printcut::Bool
-end
-
-#preferred constructor
-function UIOracle(data, lbounds, ubounds, eps, delta; cut_tol = 1e-6) 
-    N, d = size(data)
-    data_sort = sort_data_cols(data)
-    Gamma = KSGamma(delta, N)
-    qL, qR = gen_ql_qr(N, Gamma)
-    UIOracle(vec(lbounds), vec(ubounds), data_sort, log(1/eps), qL, qR, 1e-6, false)
-end
+#preferred interface
+suppFcn(xs, w::UIOracle, cut_sense) = suppFcnUI(xs, w.data_sort, w.lbounds, w.ubounds, w.log_eps, w.qL, w.qR, cut_sense)
 
 # JuMPeR alerting us that we're handling this contraint
 registerConstraint(w::UIOracle, rm::Model, ind::Int, prefs) = 

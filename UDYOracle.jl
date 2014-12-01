@@ -8,10 +8,6 @@ import JuMP.UnsetSolver
 using JuMP, Mosek  #Right now SDPs require Mosek
 
 export UDYOracle
-export suppFcnUDY
-
-#To Do
-# Add Tests
 
 type UDYOracle <: AbstractOracle
     eps_::Float64

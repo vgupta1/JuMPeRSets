@@ -7,13 +7,16 @@ facts("suppFcnTest UCS") do
 	Gamma2 = .05
 	covbar = [ 1.  0.2 
 	           0.2 1.3]
+	
+	covhat = covbar - Gamma2 * eye(2)  #covbar = covhat + Gamma2 I
+	w = UCSOracle(muhat, covhat, Gamma1, Gamma2, .1)
 
-	zstar, ustar = suppFcnUCSRd([1, 1], muhat, Gamma1, Gamma2, covbar, .1, :Max)
+	zstar, ustar = suppFcn([1, 1], w, :Max)
 	@fact zstar => roughly(6.132331444671241)
 	@fact ustar[1] => roughly(2.4661657223356204)
 	@fact ustar[2] => roughly(3.66616572233562)
 
-	zstar, ustar = suppFcnUCSRd([1, 1], muhat, Gamma1, Gamma2, covbar, .1, :Min)
+	zstar, ustar = suppFcn([1, 1], w, :Min)
 	@fact zstar => roughly(-3.7323314446712406)
 	@fact ustar[1] => roughly(-2.4661657223356204)
 	@fact ustar[2] => roughly(-1.266165722335620)
